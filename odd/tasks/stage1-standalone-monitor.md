@@ -30,13 +30,16 @@ The monitor lives inside the FlotaGrupo repo and is wired to its autopilot kit. 
 
 ## Tasks
 
-- [ ] **T1 — Import and launch** (route: inline, mechanical copy; no delegation trigger: no new design, no non-trivial authored files). `git init`, copy the monitor without its local cache/config, local config pointing at this repo, run tests, launch on `:4202`.
+- [x] **T1 — Import and launch** (route: inline, mechanical copy; no delegation trigger: no new design, no non-trivial authored files). `git init`, copy the monitor without its local cache/config, local config pointing at this repo, run tests, launch on `:4202`.
 - [ ] **T2 — Multi-project selector** (route: delegated, DeepSeek builder; writer trigger: server + UI + tests). Monitor config gets a `projects` list (name, repo, kitConfig); header dropdown switches the project; server serves the selected project's state; tests cover selection.
 
 ## Progress / evidence
 
-- (pending)
+- T1 done in commit `0e592ca`. `node --test` in `monitor/`: 105 pass, 0 fail. Three tests were bound to FlotaGrupo (folder name `fleet-monitor`, git-ignored shipped config) and now read the example config and the `monitor` folder. Monitor launched with `monitor/start.ps1 -ConfigPath .korsakov/monitor.config.json`; `GET /` → 200, `/api/state` shows this repo's git log.
+- Local layout (git-ignored `.korsakov/`): `monitor.config.json` (port 4202), `kit.config.json` (tracks), `runs/` (builder status and reports), `status-<track>.json` (the monitor reads status files from the kit config folder, NOT from `runs/`; currently a hard link).
+- T2 dispatched 2026-10-05 ~20:53 (-03:00): worktree `../Korsakov Orchestrator-worktrees/monitor-projects`, branch `builder/monitor-projects`, brief in that worktree's `.korsakov/brief.md`, runner `docs/scripts/oc-run.ps1` (agent build, deepseek-v4.1-flash max, attached to `:4096`). Visible on the monitor as "trabajando".
+- Review tier per task: T1 verbatim import, RDD not assessed yet (no review run).
 
 ## Next step
 
-T1.
+Wait for T2, review its diff, run `node --test`, then merge into `main` with the user's OK and restart the monitor.
