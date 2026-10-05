@@ -1,0 +1,48 @@
+[
+  {
+    "info": { "id": "m1", "role": "assistant", "time": { "created": 1759485600000, "completed": 1759485601000 } },
+    "parts": [
+      {
+        "id": "p1",
+        "type": "tool",
+        "tool": "bash",
+        "state": { "status": "completed", "input": { "command": "pnpm --filter web test" }, "metadata": { "exit": 0 } }
+      },
+      {
+        "id": "p2",
+        "type": "tool",
+        "tool": "write",
+        "state": {
+          "status": "completed",
+          "input": { "filePath": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\web-monitor\\apps\\web\\src\\a.tsx" }
+        }
+      },
+      {
+        "id": "p3",
+        "type": "tool",
+        "tool": "read",
+        "state": { "status": "completed", "input": { "filePath": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo\\apps\\api\\src\\x.ts" } }
+      },
+      { "id": "p4", "type": "text", "text": "Listo, corregi el formulario. Sigo con las pruebas." },
+      { "id": "p5", "type": "step-finish", "cost": 0.0123, "tokens": { "total": 4567 } }
+    ]
+  },
+  {
+    "info": { "id": "m2", "role": "assistant", "time": { "created": 1759485602000, "completed": 1759485603000 } },
+    "parts": [
+      {
+        "id": "p6",
+        "type": "tool",
+        "tool": "bash",
+        "state": { "status": "completed", "input": { "command": "git commit -m \"feat: x\"" }, "metadata": { "exit": 0 } }
+      },
+      {
+        "id": "p7",
+        "type": "tool",
+        "tool": "bash",
+        "state": { "status": "error", "input": { "command": "pnpm test" }, "output": "boom in the test run" }
+      },
+      { "id": "p8", "type": "tool", "tool": "write", "state": { "status": "running", "input": { "filePath": "C:\\ignored.ts" } } }
+    ]
+  }
+]

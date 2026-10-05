@@ -1,0 +1,3 @@
+{"timestamp":"2026-10-03T10:00:00.000Z","type":"session_meta","payload":{"id":"root-session","cwd":"C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\web-monitor"}}
+{"timestamp":"2026-10-03T10:00:05.000Z","type":"event_msg","payload":{"rate_limits":{"primary":{"used_percent":12.5,"resets_at":1791200000},"secondary":{"used_percent":41.0,"resets_at":1791500000},"rate_limit_reached_type":null}}}
+{"timestamp":"2026-10-03T10:00:09.000Z","type":"response_item","payload":{"type":"message","role":"assistant"}}

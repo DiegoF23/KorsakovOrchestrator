@@ -1,0 +1,967 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; font-src 'self'">
+<title>Monitor</title>
+<style>
+  @font-face {
+    font-family: "Share Tech Mono";
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url("/fonts/share-tech-mono.woff2") format("woff2");
+  }
+  @property --tron-angle {
+    syntax: "<angle>";
+    inherits: true;
+    initial-value: 0deg;
+  }
+  :root {
+    --bg: #000;
+    --card: #030d05;
+    --panel: #020a04;
+    --border: rgba(0, 255, 65, 0.32);
+    --live: #00ff41;
+    --text: #35e05f;
+    --dim: #00a333;
+    --warn: #ffb000;
+    --err: #ff5555;
+    --work: #ffc233;
+    --wait: #57d7ff;
+    --stale: #3f5bd9;
+    --font: "Cascadia Mono", Consolas, "Courier New", monospace;
+    --font-display: "Share Tech Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+    background: repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.05) 0 1px, transparent 1px 3px);
+  }
+  #rain {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    opacity: 0.10;
+    pointer-events: none;
+  }
+  .app {
+    position: relative;
+    z-index: 1;
+    height: 100vh;
+    height: 100dvh;
+    width: 100%;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow: hidden;
+  }
+  .topbar {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 5px;
+  }
+  .topbar-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 12px;
+    min-width: 0;
+  }
+  h1 {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 20px;
+    letter-spacing: 2px;
+    color: var(--live);
+    text-shadow: 0 0 8px rgba(0, 255, 65, 0.55);
+  }
+  .dim { color: var(--dim); }
+  .warn { color: var(--warn); }
+  .err { color: var(--err); }
+  .stamp { color: var(--dim); font-size: 11px; }
+  .link { font-size: 11px; }
+  .link-up { color: var(--live); text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
+  .link-down { color: var(--warn); }
+  .orch { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
+  .orch-engine { color: var(--live); font-size: 13px; text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
+  .orch-model { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
+  .usage { display: grid; gap: 3px; min-width: 0; }
+  .usage-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow: hidden; }
+  .usage-label { font-family: var(--font-display); color: var(--live); letter-spacing: 1px; min-width: 96px; }
+  .usage-stale .usage-label { color: var(--dim); }
+  .usage-stale .seg-on { opacity: 0.35; }
+  .meter-label { color: var(--dim); font-size: 10.5px; }
+  .usage-reset { color: var(--dim); }
+  .usage-age { margin-left: auto; color: var(--dim); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; }
+  .bar { display: inline-flex; gap: 1px; }
+  .seg { width: 7px; height: 13px; background: rgba(0, 255, 65, 0.12); }
+  .bar-warn .seg { background: rgba(255, 176, 0, 0.14); }
+  .bar-crit .seg { background: rgba(255, 85, 85, 0.14); }
+  .bar-ok .seg-on { background: var(--live); }
+  .bar-warn .seg-on { background: var(--warn); }
+  .bar-crit .seg-on { background: var(--err); }
+  .pct { min-width: 32px; }
+  .pc { display: inline-flex; align-items: center; gap: 4px 10px; font-size: 11px; }
+  .pc-label { color: var(--live); letter-spacing: 1px; }
+  .pc-item { color: var(--dim); }
+  .pc-value.pc-ok { color: var(--live); }
+  .pc-value.pc-warn { color: var(--warn); }
+  .pc-value.pc-crit { color: var(--err); }
+  /* Warning and critical meters read as filled chips, like the terminal board. */
+  .pc-item:has(.pc-warn) { background: var(--warn); color: #000; padding: 0 5px; }
+  .pc-item:has(.pc-crit) { background: var(--err); color: #fff; padding: 0 5px; animation: crit-blink 1.2s steps(2, jump-none) infinite; }
+  .pc-item:has(.pc-warn) .pc-value,
+  .pc-item:has(.pc-crit) .pc-value { color: inherit; animation: none; }
+  /* Critical PC and usage meters blink slowly (about once a second) to flag urgency. */
+  .pc-value.pc-crit,
+  .bar-crit .seg-on { animation: crit-blink 1.2s steps(2, jump-none) infinite; }
+  @keyframes crit-blink { 0% { opacity: 1; } 100% { opacity: 0.25; } }
+  .blink-alert { animation: crit-blink 1.2s steps(2, jump-none) infinite; }
+  .notices { flex: 0 0 auto; display: flex; flex-wrap: wrap; gap: 6px; }
+  .notice {
+    border: 1px solid var(--warn);
+    color: var(--warn);
+    border-radius: 4px;
+    padding: 2px 8px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  .section-title {
+    flex: 0 0 auto;
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--live);
+    text-shadow: 0 0 6px rgba(0, 255, 65, 0.45);
+  }
+  /* The hidden-cards note is a real button, but it stays as discreet as the
+     dim text it replaced. */
+  .hidden-toggle {
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--dim);
+    font: inherit;
+    letter-spacing: inherit;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+  }
+  .hidden-toggle:hover { color: var(--text); }
+  .workers {
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+    gap: 6px;
+    align-content: start;
+  }
+  .worker {
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel);
+    padding: 5px 8px;
+  }
+  .worker.state-working { border-color: rgba(255, 194, 51, 0.5); }
+  .worker.state-done { border-color: rgba(0, 255, 65, 0.55); --tron-rgb: 0, 255, 65; }
+  .worker.state-error { border-color: rgba(255, 85, 85, 0.6); --tron-rgb: 255, 85, 85; }
+  .worker.state-waiting { border-color: rgba(87, 215, 255, 0.5); }
+  .worker.state-stale { border-color: rgba(111, 134, 255, 0.55); }
+  .worker-head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+    font-family: var(--font-display);
+  }
+  .identity { color: var(--text); }
+  .worker-head .task { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .worker-head .eta { color: var(--dim); margin-left: auto; font-size: 14px; }
+  .state-working .identity,
+  .state-working .task,
+  .state-working .eta { color: var(--work); text-shadow: 0 0 7px rgba(255, 194, 51, 0.5); }
+  .state-done .identity,
+  .state-done .task,
+  .state-done .eta { color: var(--live); text-shadow: 0 0 7px rgba(0, 255, 65, 0.45); }
+  .state-error .identity,
+  .state-error .task { color: var(--err); text-shadow: 0 0 7px rgba(255, 85, 85, 0.4); }
+  .state-error .eta { color: var(--err); text-shadow: none; }
+  .state-waiting .identity,
+  .state-waiting .task,
+  .state-waiting .eta { color: var(--wait); text-shadow: 0 0 7px rgba(87, 215, 255, 0.4); }
+  .state-stale .identity,
+  .state-stale .task,
+  .state-stale .eta { color: var(--stale); text-shadow: 0 0 7px rgba(111, 134, 255, 0.4); }
+  /* Tron border: a bright head runs around the card border followed by a short
+     trail of dots. Finished (green) and error (red) cards only; reduced motion
+     swaps it for a static glow. */
+  .worker.state-done::before,
+  .worker.state-error::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    border-radius: inherit;
+    padding: 1.4px;
+    pointer-events: none;
+    background: conic-gradient(from var(--tron-angle),
+      rgba(255, 255, 255, 0.92) 0deg 1.4deg,
+      rgba(var(--tron-rgb), 0.95) 1.4deg 5.6deg,
+      transparent 5.6deg 8deg,
+      rgba(var(--tron-rgb), 0.55) 8deg 10.4deg,
+      transparent 10.4deg 12.8deg,
+      rgba(var(--tron-rgb), 0.4) 12.8deg 14.8deg,
+      transparent 14.8deg 17.2deg,
+      rgba(var(--tron-rgb), 0.28) 17.2deg 18.8deg,
+      transparent 18.8deg 21deg,
+      rgba(var(--tron-rgb), 0.17) 21deg 22.2deg,
+      transparent 22.2deg 360deg);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    animation: tron-border 3.8s linear infinite;
+  }
+  @keyframes tron-border {
+    to { --tron-angle: 360deg; }
+  }
+  .worker-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 10.5px;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .worker-meta .model { overflow: hidden; text-overflow: ellipsis; }
+  /* Short line next to the model + effort: it repeats the colour the git tree
+     uses for this worker's branch lane, so a card matches its branch at a
+     glance. A branch with no lane in the tree keeps the neutral dim. */
+  .worker-meta .branch-swatch {
+    flex: 0 0 auto;
+    align-self: center;
+    width: 48px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--dim);
+  }
+  .badge { padding: 0 5px; border: 1px solid currentColor; border-radius: 3px; font-size: 10px; }
+  .badge-working { color: var(--work); }
+  .badge-done { color: var(--live); }
+  .badge-error { color: var(--err); }
+  .badge-waiting { color: var(--wait); }
+  .badge-stale { color: var(--stale); }
+  .badge-hidden { color: var(--dim); }
+  /* Hidden finished cards, shown on demand: dimmed and marked as "oculta". */
+  .worker.worker-hidden { opacity: 0.62; }
+  .worker-commit { font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--dim); }
+  .worker-commit .subject { color: var(--text); }
+  .worker-summary {
+    margin-top: 2px;
+    font-size: 10.5px;
+    font-style: italic;
+    color: var(--dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .events { list-style: none; margin: 3px 0 0; padding: 0; }
+  .event {
+    display: grid;
+    grid-template-columns: 50px 42px minmax(0, 1fr);
+    gap: 4px;
+    font-size: 10.5px;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .event > span { overflow: hidden; text-overflow: ellipsis; }
+  .event .ts, .event .kind { color: var(--dim); }
+  .event .detail { color: var(--text); }
+  .event.kind-ERR .kind, .event.kind-ERR .detail { color: var(--err); }
+  .event.kind-COMMIT .kind, .event.kind-COMMIT .detail { color: var(--live); text-shadow: 0 0 5px rgba(0, 255, 65, 0.4); }
+  /* The tree takes every free pixel below the worker cards (at least 32vh), with
+     its own scrollbar so the 200-commit history is browsable while the page never scrolls. */
+  .git {
+    flex: 1 1 auto;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--card);
+    padding: 5px 8px 4px;
+  }
+  .git h2 {
+    flex: 0 0 auto;
+    margin: 0 0 2px;
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--live);
+    text-shadow: 0 0 6px rgba(0, 255, 65, 0.45);
+  }
+  .git-body {
+    position: relative;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 163, 51, 0.6) transparent;
+  }
+  .git-body::-webkit-scrollbar { width: 9px; }
+  .git-body::-webkit-scrollbar-track { background: transparent; }
+  .git-body::-webkit-scrollbar-thumb { background: rgba(0, 163, 51, 0.55); border-radius: 5px; }
+  #git-lines { position: absolute; top: 0; left: 0; }
+  .commits { list-style: none; margin: 0; padding: 0 0 0 var(--graph-w, 0px); }
+  .commit { display: flex; align-items: center; gap: 6px; height: 22px; font-size: 11.5px; white-space: nowrap; }
+  .commit .sha { color: var(--dim); }
+  .commit .subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .commit .time { color: var(--dim); padding-left: 8px; }
+  .chip { border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; font-size: 10px; line-height: 1.5; }
+  .chip-head { color: var(--live); text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
+  .chip-tag { color: var(--warn); }
+  .chip-remote { color: var(--dim); }
+  .chip-branch { color: var(--text); }
+  .git-empty, .empty { color: var(--dim); font-size: 11px; margin: 0; }
+  /* Card mode: with little free space left the tree stops being a full-width
+     panel and becomes the first card of the workers grid, matching a worker
+     card. The graph and the ref chips are hidden and rows get compact, but the
+     newest commits stay browsable with the card's own scroll. `contain: size`
+     keeps the long commit list from inflating its grid row; the mode decision
+     (with hysteresis) lives in the git-layout-logic script block. */
+  .workers > .git {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel);
+    padding: 5px 8px;
+    min-width: 0;
+    min-height: 140px;
+    overflow: hidden;
+    contain: size;
+  }
+  .workers > .git h2 { margin-bottom: 1px; }
+  .workers > .git #git-lines { display: none; }
+  .workers > .git .commits { padding-left: 0; }
+  .workers > .git .commit { height: 20px; font-size: 11px; }
+  .workers > .git .commit .chip { display: none; }
+  /* A card leaves the grid flow only while the page measures the free space. */
+  .git.is-measuring { position: absolute; visibility: hidden; left: 0; right: 0; }
+  @keyframes commit-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes node-flash {
+    0% { filter: drop-shadow(0 0 0 rgba(0, 255, 65, 0)); }
+    35% { filter: drop-shadow(0 0 7px rgba(0, 255, 65, 0.95)); }
+    100% { filter: drop-shadow(0 0 0 rgba(0, 255, 65, 0)); }
+  }
+  .commit.is-new { animation: commit-in 260ms ease-out both; }
+  .node.is-new { animation: node-flash 900ms ease-out both; }
+  :focus-visible { outline: 2px solid var(--live); outline-offset: 2px; }
+  @media (prefers-reduced-motion: reduce) {
+    #rain { display: none; }
+    * { animation: none !important; transition: none !important; }
+    .worker.state-done::before,
+    .worker.state-error::before { display: none; }
+    .worker.state-done { box-shadow: 0 0 9px rgba(0, 255, 65, 0.45), inset 0 0 7px rgba(0, 255, 65, 0.22); }
+    .worker.state-error { box-shadow: 0 0 9px rgba(255, 85, 85, 0.45), inset 0 0 7px rgba(255, 85, 85, 0.22); }
+  }
+</style>
+</head>
+<body>
+<canvas id="rain" aria-hidden="true"></canvas>
+<div class="app">
+  <header class="topbar">
+    <div class="topbar-line">
+      <h1>Monitor</h1>
+      <span class="link link-up" id="link" role="status">en línea</span>
+      <span class="stamp" id="stamp">esperando la primera lectura…</span>
+      <span class="orch" id="orch" title="">
+        <span class="orch-engine" id="orch-engine">ORQUESTADOR:</span>
+        <span class="orch-model" id="orch-model"></span>
+      </span>
+      <div class="pc" id="pc" aria-label="Carga del PC"></div>
+    </div>
+    <div class="usage" id="usage" aria-label="Medidores de consumo"></div>
+  </header>
+
+  <div class="notices" id="notices"></div>
+
+  <h2 class="section-title" id="workers-title">Agentes <span class="dim" id="workers-meta"></span> <button type="button" class="hidden-toggle" id="hidden-toggle" aria-pressed="false" hidden></button></h2>
+  <section class="workers" id="workers" aria-labelledby="workers-title"></section>
+
+  <section class="git" id="git-section" aria-labelledby="git-title">
+    <h2 id="git-title">Árbol de git <span class="dim" id="git-meta"></span></h2>
+    <div class="git-body" id="git-body">
+      <svg id="git-lines" aria-hidden="true"></svg>
+      <ol class="commits" id="git-commits"></ol>
+    </div>
+  </section>
+</div>
+
+<script id="git-layout-logic">
+  // Git tree mode decision, kept pure so the layout tests can exercise it.
+  // Below one worker card (140 px) or 22 % of the viewport the tree becomes a
+  // card; the 24 px margin between both thresholds is the hysteresis that
+  // keeps the page from flickering between the panel and the card.
+  var GIT_PANEL_MIN_PX = 140;
+  var GIT_CARD_MIN_VH = 0.22;
+  var GIT_MODE_HYSTERESIS_PX = 24;
+  function gitCardMode(available, viewportHeight, previous) {
+    var threshold = Math.max(GIT_PANEL_MIN_PX, viewportHeight * GIT_CARD_MIN_VH);
+    var limit = previous === "card" ? threshold + GIT_MODE_HYSTERESIS_PX : threshold;
+    return available < limit ? "card" : "panel";
+  }
+</script>
+<script>
+(function () {
+  "use strict";
+
+  var POLL_FALLBACK = 5;
+  var BAR_SEGMENTS = 10;
+  var ROW_H = 22;
+  var LANE_W = 14;
+  var PAD_X = 8;
+  var PAD_Y = 11;
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var FALLBACK_LANE_COLOR = "#00a333";
+  var HIDDEN_STORAGE_KEY = "fleet-monitor.showHidden";
+  var snapshot = null;
+  var knownShas = new Set();
+  var firstRender = true;
+  var gitMode = "panel";
+  var showHidden = false;
+  // The choice of showing the hidden finished cards survives the refresh; the
+  // page still works when storage is unavailable (private mode, blocked).
+  try {
+    showHidden = window.localStorage.getItem(HIDDEN_STORAGE_KEY) === "1";
+  } catch (error) {
+    showHidden = false;
+  }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
+  function clear(node) {
+    while (node.firstChild) node.removeChild(node.firstChild);
+  }
+  function fmtClock(iso) {
+    var date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleTimeString("es-AR", { hour12: false });
+  }
+  function fmtReset(iso) {
+    if (!iso) return "";
+    var left = new Date(iso).getTime() - Date.now();
+    if (!(left > 0)) return "";
+    var totalMinutes = Math.floor(left / 60000);
+    return "↻" + Math.floor(totalMinutes / 60) + "h" + String(totalMinutes % 60).padStart(2, "0");
+  }
+  function relativeTime(iso) {
+    var time = new Date(iso).getTime();
+    if (!Number.isFinite(time)) return "";
+    var minutes = Math.floor((Date.now() - time) / 60000);
+    if (minutes < 1) return "ahora";
+    if (minutes < 60) return "hace " + minutes + " min";
+    var hours = Math.floor(minutes / 60);
+    if (hours < 24) return "hace " + hours + " h";
+    return "hace " + Math.floor(hours / 24) + " d";
+  }
+  function levelOf(value) {
+    if (value === null || value === undefined) return "ok";
+    return value >= 80 ? "crit" : value >= 50 ? "warn" : "ok";
+  }
+  // Consumption meters: green below 70 %, amber from 70 % to 89 %, red from
+  // 90 % up. The PC line keeps its own 50/80 thresholds.
+  function usageLevelOf(value) {
+    if (value === null || value === undefined) return "ok";
+    return value >= 90 ? "crit" : value >= 70 ? "warn" : "ok";
+  }
+  function bar(pct, label) {
+    var value = Math.max(0, Math.min(100, Number(pct) || 0));
+    // From 80 % a consumption meter blinks so the quota never catches anyone off guard.
+    var box = el("span", "bar bar-" + usageLevelOf(value) + (value >= 80 ? " blink-alert" : ""));
+    box.setAttribute("role", "img");
+    box.setAttribute("aria-label", label + ": " + Math.round(value) + " %");
+    var on = Math.round((value / 100) * BAR_SEGMENTS);
+    for (var i = 0; i < BAR_SEGMENTS; i++) {
+      box.appendChild(el("span", i < on ? "seg seg-on" : "seg"));
+    }
+    return box;
+  }
+
+  function renderUsage(usages) {
+    var box = document.getElementById("usage");
+    clear(box);
+    (usages || []).forEach(function (usage) {
+      var name = usage.label || usage.id;
+      var row = el("div", "usage-row" + (usage.stale ? " usage-stale" : ""));
+      row.appendChild(el("span", "usage-label", name));
+      if (!usage.available) {
+        row.appendChild(el("span", "dim", usage.error || "sin datos"));
+        box.appendChild(row);
+        return;
+      }
+      var five = usage.fiveHour || { pct: 0 };
+      var week = usage.week || { pct: 0 };
+      row.appendChild(el("span", "meter-label", "5 h"));
+      row.appendChild(bar(five.pct, name + " 5 h"));
+      row.appendChild(el("span", "pct" + (five.pct >= 80 ? " blink-alert" : ""), Math.round(five.pct) + "%"));
+      var reset = fmtReset(five.resetsAt);
+      if (reset) row.appendChild(el("span", "usage-reset", reset));
+      row.appendChild(el("span", "meter-label", "sem"));
+      row.appendChild(bar(week.pct, name + " semana"));
+      row.appendChild(el("span", "pct" + (week.pct >= 80 ? " blink-alert" : ""), Math.round(week.pct) + "%"));
+      if (usage.ageText) row.appendChild(el("span", "usage-age" + (usage.stale ? " warn" : ""), usage.ageText));
+      if (usage.extra) row.appendChild(el("span", /LÍMITE/.test(usage.extra) ? "warn" : "dim", usage.extra));
+      box.appendChild(row);
+    });
+    if (!box.firstChild) box.appendChild(el("span", "empty", "Sin medidores de consumo."));
+  }
+
+  function eventLine(event) {
+    var item = el("li", "event kind-" + event.kind);
+    var detail = el("span", "detail", event.detail);
+    detail.title = event.detail;
+    item.appendChild(el("span", "ts", event.time ? fmtClock(event.time) : ""));
+    item.appendChild(el("span", "kind", event.kind));
+    item.appendChild(detail);
+    return item;
+  }
+
+  function workerCard(worker, activityLines, hiddenCard) {
+    var kind = worker.stateKind || worker.state;
+    var card = el("article", "worker state-" + kind + (hiddenCard ? " worker-hidden" : ""));
+    var head = el("div", "worker-head");
+    head.setAttribute("aria-label", worker.title || worker.identity);
+    head.appendChild(el("span", "identity", worker.identity));
+    if (worker.shortTitle) head.appendChild(el("span", "task", worker.shortTitle));
+    if (worker.remaining) head.appendChild(el("span", "eta", worker.remaining));
+    card.appendChild(head);
+
+    if (worker.summaryEs) {
+      var summary = el("div", "worker-summary", worker.summaryEs);
+      summary.title = worker.summaryEs;
+      card.appendChild(summary);
+    }
+
+    var meta = el("div", "worker-meta");
+    meta.appendChild(el("span", "badge badge-" + kind, worker.stateText));
+    if (hiddenCard) meta.appendChild(el("span", "badge badge-hidden", "oculta"));
+    meta.appendChild(el("span", "model", worker.model));
+    var swatch = el("span", "branch-swatch");
+    swatch.setAttribute("aria-hidden", "true");
+    if (worker.branchColor) swatch.style.background = worker.branchColor;
+    if (worker.branch) swatch.title = "rama " + worker.branch;
+    meta.appendChild(swatch);
+    card.appendChild(meta);
+
+    var commit = el("div", "worker-commit");
+    if (worker.lastCommit) {
+      var original = worker.lastCommit.subject || "";
+      commit.appendChild(el("span", "", worker.lastCommit.sha + " "));
+      commit.appendChild(el("span", "subject", worker.lastCommit.subjectEs || original));
+      commit.title = worker.lastCommit.sha + " " + original;
+    } else {
+      commit.appendChild(el("span", "", "sin commit en la rama " + (worker.branch || "")));
+    }
+    card.appendChild(commit);
+
+    var events = (worker.activity && worker.activity.events) || [];
+    if (events.length) {
+      var list = el("ul", "events");
+      events.slice(-activityLines).forEach(function (event) {
+        list.appendChild(eventLine(event));
+      });
+      card.appendChild(list);
+    } else {
+      card.appendChild(el("p", "empty", (worker.activity && worker.activity.notice) || "sin actividad visible"));
+    }
+    return card;
+  }
+
+  // Label of the hidden-cards button: the count when they are out of the
+  // board, the action when they are already shown.
+  function hiddenToggleLabel(hidden) {
+    if (showHidden) return hidden === 1 ? "ocultar 1 terminada" : "ocultar " + hidden + " terminadas";
+    return hidden === 1 ? "1 terminada oculta" : hidden + " terminadas ocultas";
+  }
+
+  function renderWorkers(workers, hiddenWorkers, hiddenFinished, activityLines, activityLinesTotal) {
+    var box = document.getElementById("workers");
+    var gitCard = document.getElementById("git-section");
+    // In card mode the tree lives first in this grid; keep it in place so its
+    // scroll position survives every refresh.
+    Array.prototype.slice.call(box.children).forEach(function (child) {
+      if (child !== gitCard) box.removeChild(child);
+    });
+    var list = workers || [];
+    var hiddenList = hiddenWorkers || [];
+    var active = list.filter(function (worker) {
+      return (worker.stateKind || worker.state) === "working";
+    }).length;
+    var hidden = Math.max(0, Number(hiddenFinished) || hiddenList.length);
+    var meta = [];
+    if (list.length) meta.push(active + " activos / " + list.length + " en total");
+    document.getElementById("workers-meta").textContent = meta.length ? "· " + meta.join(" · ") : "";
+    // The hidden count is a discreet button: it reveals those cards right away
+    // and the choice is kept in page state across refreshes.
+    var toggle = document.getElementById("hidden-toggle");
+    toggle.hidden = hidden === 0;
+    toggle.textContent = hiddenToggleLabel(hidden);
+    toggle.setAttribute("aria-pressed", showHidden ? "true" : "false");
+    var cards = showHidden ? list.concat(hiddenList) : list;
+    if (!cards.length) {
+      box.appendChild(el("p", "empty", "No hay pistas visibles en la configuración del kit."));
+      return;
+    }
+    // The budget shrinks with the visible cards by default; shown hidden cards
+    // count towards the total.
+    var budget = Number(showHidden ? activityLinesTotal : activityLines);
+    if (!(budget > 0)) budget = 8;
+    cards.forEach(function (worker) {
+      box.appendChild(workerCard(worker, budget, showHidden && hiddenList.indexOf(worker) !== -1));
+    });
+  }
+
+  function renderPc(pc) {
+    var box = document.getElementById("pc");
+    clear(box);
+    box.appendChild(el("span", "pc-label", "PC"));
+    if (!pc || (pc.cpu === null && pc.ram === null && pc.diskC === null)) {
+      box.appendChild(el("span", "dim", (pc && pc.error) || "sin datos"));
+      return;
+    }
+    [
+      ["CPU", pc.cpu],
+      ["RAM", pc.ram],
+      ["Disco C:", pc.diskC]
+    ].forEach(function (entry) {
+      var level = levelOf(entry[1]);
+      var item = el("span", "pc-item", entry[0] + " ");
+      item.appendChild(
+        el("span", "pc-value pc-" + level, entry[1] === null || entry[1] === undefined ? "?" : Math.round(entry[1]) + "%")
+      );
+      box.appendChild(item);
+    });
+  }
+
+  function laneX(lane) {
+    return PAD_X + lane * LANE_W;
+  }
+  // Colours come from the server (one per lane, deterministic per branch
+  // name), so the graph and the worker cards share a single assignment.
+  function laneColor(commit, lane) {
+    var colors = (commit && commit.laneColors) || [];
+    return colors[lane] || FALLBACK_LANE_COLOR;
+  }
+  function svgLine(svg, x1, y1, x2, y2, color) {
+    var line = document.createElementNS(SVG_NS, "line");
+    line.setAttribute("x1", x1);
+    line.setAttribute("y1", y1);
+    line.setAttribute("x2", x2);
+    line.setAttribute("y2", y2);
+    line.setAttribute("stroke", color);
+    line.setAttribute("stroke-width", "1.6");
+    line.setAttribute("stroke-linecap", "round");
+    svg.appendChild(line);
+  }
+  function svgCurve(svg, x1, y1, x2, y2, color) {
+    var path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + 8) + ", " + x2 + " " + (y2 - 8) + ", " + x2 + " " + y2);
+    path.setAttribute("fill", "none");
+    path.setAttribute("stroke", color);
+    path.setAttribute("stroke-width", "1.6");
+    path.setAttribute("stroke-linecap", "round");
+    svg.appendChild(path);
+  }
+  function drawCommit(svg, commit, index, isNew) {
+    var y = index * ROW_H + PAD_Y;
+    var before = commit.lanesBefore || [];
+    var after = commit.lanesAfter || [];
+    var lanes = Math.max(before.length, after.length, commit.laneCount || 1);
+    for (var lane = 0; lane < lanes; lane++) {
+      var x = laneX(lane);
+      var hasTop = before[lane] !== null && before[lane] !== undefined;
+      var hasBottom = after[lane] !== null && after[lane] !== undefined;
+      if (lane === commit.lane) {
+        if (hasTop) svgLine(svg, x, y - PAD_Y, x, y, laneColor(commit, lane));
+        if (hasBottom) svgLine(svg, x, y, x, y + PAD_Y, laneColor(commit, lane));
+      } else if (hasTop || hasBottom) {
+        svgLine(svg, x, y - PAD_Y, x, y + PAD_Y, laneColor(commit, lane));
+      }
+    }
+    (commit.parents || []).forEach(function (link) {
+      if (link.lane === commit.lane) return;
+      svgCurve(svg, laneX(commit.lane), y, laneX(link.lane), y + PAD_Y, laneColor(commit, link.lane));
+    });
+    var node = document.createElementNS(SVG_NS, "circle");
+    node.setAttribute("cx", laneX(commit.lane));
+    node.setAttribute("cy", y);
+    node.setAttribute("r", "3.2");
+    node.setAttribute("fill", laneColor(commit, commit.lane));
+    if (isNew) node.setAttribute("class", "node is-new");
+    svg.appendChild(node);
+  }
+  function commitRow(commit, isNew) {
+    var item = el("li", "commit" + (isNew ? " is-new" : ""));
+    (commit.refs || []).forEach(function (ref) {
+      item.appendChild(el("span", "chip chip-" + ref.kind, ref.name));
+    });
+    item.appendChild(el("span", "sha", commit.shortSha));
+    var english = commit.subject || "";
+    var subject = el("span", "subject", commit.subjectEs || english || "(sin asunto)");
+    subject.title = english;
+    item.appendChild(subject);
+    item.appendChild(el("span", "time", relativeTime(commit.time)));
+    return item;
+  }
+  function renderGit(git) {
+    var list = document.getElementById("git-commits");
+    var svg = document.getElementById("git-lines");
+    var meta = document.getElementById("git-meta");
+    clear(list);
+    clear(svg);
+    meta.textContent = "";
+    var commits = (git && git.commits) || [];
+    if (!commits.length) {
+      list.appendChild(el("li", "git-empty", (git && git.error) || "sin datos"));
+      return;
+    }
+    var laneCount = 1;
+    commits.forEach(function (commit) {
+      laneCount = Math.max(laneCount, commit.laneCount || 1);
+    });
+    var graphW = PAD_X * 2 + (laneCount - 1) * LANE_W;
+    list.style.setProperty("--graph-w", graphW + "px");
+    svg.setAttribute("width", graphW);
+    svg.setAttribute("height", commits.length * ROW_H);
+    svg.setAttribute("viewBox", "0 0 " + graphW + " " + commits.length * ROW_H);
+    commits.forEach(function (commit, index) {
+      var isNew = Boolean(commit.__isNew);
+      commit.__isNew = false;
+      drawCommit(svg, commit, index, isNew);
+      list.appendChild(commitRow(commit, isNew));
+    });
+    meta.textContent = "· " + commits.length + " commits";
+  }
+
+  function renderNotices(notices) {
+    var box = document.getElementById("notices");
+    clear(box);
+    (notices || []).forEach(function (text) {
+      box.appendChild(el("div", "notice", text));
+    });
+  }
+
+  // Free space a full-width git panel would get, measured from the actual
+  // layout: the app's content box minus every other row and the flex gaps.
+  function measurePanelSpace() {
+    var app = document.querySelector(".app");
+    var appStyle = window.getComputedStyle(app);
+    var workers = document.getElementById("workers");
+    var git = document.getElementById("git-section");
+    var content = app.clientHeight
+      - (parseFloat(appStyle.paddingTop) || 0)
+      - (parseFloat(appStyle.paddingBottom) || 0);
+    var others = 0;
+    Array.prototype.slice.call(app.children).forEach(function (child) {
+      if (child !== workers && child !== git) others += child.offsetHeight;
+    });
+    var workersHeight;
+    if (gitMode === "card" && git.parentNode === workers) {
+      // Out of the grid flow only while measuring, so the grid is sized as if
+      // the card were already gone.
+      git.classList.add("is-measuring");
+      workersHeight = workers.offsetHeight;
+      git.classList.remove("is-measuring");
+    } else {
+      workersHeight = workers.offsetHeight;
+    }
+    // The hypothetical panel adds one row to the app column; every row keeps
+    // one gap.
+    var rows = app.children.length + (git.parentNode === workers ? 1 : 0);
+    var gap = parseFloat(appStyle.rowGap || appStyle.gap) || 0;
+    return content - others - workersHeight - gap * (rows - 1);
+  }
+
+  // Moves the tree between the full-width panel and the first worker card.
+  function applyGitLayout() {
+    var git = document.getElementById("git-section");
+    var workers = document.getElementById("workers");
+    var app = document.querySelector(".app");
+    var next = gitCardMode(measurePanelSpace(), window.innerHeight, gitMode);
+    gitMode = next;
+    if (next === "card") {
+      git.classList.add("card");
+      if (git.parentNode !== workers) workers.insertBefore(git, workers.firstChild);
+    } else {
+      git.classList.remove("card");
+      if (git.parentNode !== app) app.appendChild(git);
+    }
+  }
+
+  function render(next) {
+    snapshot = next;
+    var commits = (next.git && next.git.commits) || [];
+    commits.forEach(function (commit) {
+      commit.__isNew = !firstRender && !knownShas.has(commit.sha);
+    });
+    knownShas = new Set(commits.map(function (commit) {
+      return commit.sha;
+    }));
+    firstRender = false;
+
+    var orchestrator = next.orchestrator || {};
+    document.getElementById("orch-model").textContent = orchestrator.text || "";
+    document.getElementById("orch").title = [orchestrator.label, orchestrator.engine].filter(Boolean).join(" · ");
+    renderUsage(next.usages);
+    renderWorkers(next.workers, next.hiddenWorkers, next.hiddenFinished, next.activityLines, next.activityLinesTotal);
+    renderPc(next.pc);
+    renderGit(next.git);
+    renderNotices(next.notices);
+    applyGitLayout();
+    document.getElementById("stamp").textContent = "actualizado " + fmtClock(next.generatedAt);
+  }
+
+  function setLink(up) {
+    var link = document.getElementById("link");
+    link.textContent = up ? "en línea" : "sin conexión, reintentando";
+    link.className = "link " + (up ? "link-up" : "link-down");
+  }
+
+  function schedule() {
+    var seconds = (snapshot && Number(snapshot.pollSeconds)) || POLL_FALLBACK;
+    window.setTimeout(poll, Math.max(2, seconds) * 1000);
+  }
+
+  function poll() {
+    fetch("/api/state", { cache: "no-store" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        render(data);
+        setLink(true);
+      })
+      .catch(function () {
+        setLink(false);
+      })
+      .then(schedule);
+  }
+
+  // Digital rain: subtle, ~20 fps, pauses with the tab and turns off for
+  // prefers-reduced-motion.
+  function startRain() {
+    var canvas = document.getElementById("rain");
+    var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reduced.matches || !canvas.getContext) {
+      canvas.style.display = "none";
+      return;
+    }
+    var context = canvas.getContext("2d");
+    var columns = 0;
+    var drops = [];
+    var frame = null;
+    var last = 0;
+    function resize() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      columns = Math.max(1, Math.floor(canvas.width / 16));
+      drops = new Array(columns).fill(0).map(function () {
+        return Math.floor(Math.random() * -40);
+      });
+    }
+    function draw(now) {
+      if (now - last >= 50) {
+        last = now;
+        context.fillStyle = "rgba(0, 0, 0, 0.08)";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.font = "15px monospace";
+        for (var i = 0; i < columns; i++) {
+          var text = String.fromCharCode(0x30a0 + Math.floor(Math.random() * 96));
+          context.fillStyle = "rgba(0, 255, 65, 0.85)";
+          context.fillText(text, i * 16, drops[i] * 16);
+          if (drops[i] * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+          drops[i]++;
+        }
+      }
+      frame = window.requestAnimationFrame(draw);
+    }
+    function stop() {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = null;
+    }
+    resize();
+    window.addEventListener("resize", resize);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) stop();
+      else if (!frame) frame = window.requestAnimationFrame(draw);
+    });
+    frame = window.requestAnimationFrame(draw);
+  }
+
+  window.addEventListener("resize", function () {
+    if (!snapshot) return;
+    applyGitLayout();
+    renderGit(snapshot.git);
+  });
+
+  document.getElementById("hidden-toggle").addEventListener("click", function () {
+    showHidden = !showHidden;
+    try {
+      window.localStorage.setItem(HIDDEN_STORAGE_KEY, showHidden ? "1" : "0");
+    } catch (error) {
+      // Without storage the choice lives only in this page.
+    }
+    if (snapshot) {
+      renderWorkers(
+        snapshot.workers,
+        snapshot.hiddenWorkers,
+        snapshot.hiddenFinished,
+        snapshot.activityLines,
+        snapshot.activityLinesTotal
+      );
+    }
+  });
+
+  startRain();
+  poll();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,5 @@
+{"type":"item.started","item":{"type":"command_execution","command":"\"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -Command git status --short"}}
+{"type":"item.completed","item":{"type":"command_execution","command":"git status --short","exit_code":0}}
+{"type":"item.completed","item":{"type":"command_execution","command":"pnpm test","exit_code":1}}
+{"type":"item.completed","item":{"type":"agent_message","text":"Listo. Sigo con las pruebas."}}
+{"type":"item.completed","item":{"type":"file_change","changes":[{"kind":"update","path":"C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\web-monitor\\apps\\web\\src\\a.tsx"}]}}

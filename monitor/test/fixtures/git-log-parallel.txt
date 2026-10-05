@@ -1,0 +1,5 @@
+X1|X0|HEAD -> feature/x|feat two|1700005000
+M1|M0|main|main two|1700004000
+X0|R|feature/x|feat one|1700003000
+M0|R|main|main one|1700002000
+R|||root|1700001000
