@@ -16,7 +16,9 @@ import { buildSnapshot, buildWorkerSteps, loadConfig, resolveProjects } from "./
 const DEFAULT_CONFIG = "fleet-monitor.config.json";
 const STATIC_TYPES = {
   ".woff2": "font/woff2",
-  ".txt": "text/plain; charset=utf-8"
+  ".txt": "text/plain; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8"
 };
 
 export function isLoopback(host) {
@@ -53,6 +55,7 @@ export function routeRequest(method, pathname) {
   if (pathname === "/api/state") return "state";
   if (pathname === "/api/steps") return "steps";
   if (pathname.startsWith("/fonts/")) return "font";
+  if (pathname.startsWith("/js/")) return "script";
   return null;
 }
 
@@ -132,7 +135,7 @@ export function createRequestHandler(config, options = {}) {
       return;
     }
 
-    if (route === "font") {
+    if (route === "font" || route === "script") {
       const file = resolveStaticFile(path.join(serverDir, "public"), pathname);
       const type = file ? STATIC_TYPES[path.extname(file).toLowerCase()] : null;
       if (!file || !type) {
@@ -141,7 +144,10 @@ export function createRequestHandler(config, options = {}) {
       }
       try {
         const data = fs.readFileSync(file);
-        send(response, 200, type, request.method === "HEAD" ? undefined : data, "public, max-age=86400");
+        // The font is immutable enough to cache; the viewer module is read on
+        // every reload so a local edit shows up without clearing the cache.
+        const cache = route === "font" ? "public, max-age=86400" : "no-store";
+        send(response, 200, type, request.method === "HEAD" ? undefined : data, cache);
       } catch {
         send(response, 404, "text/plain; charset=utf-8", "No encontrado");
       }
