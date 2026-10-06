@@ -131,6 +131,48 @@ ANSI, tipografías y efectos) y, si el tema lo pide, sumar un módulo a
 completos —contraste, fuentes locales, fondo en una capa propia y a lo sumo
 ~30 fps— están en `docs/temas.md`.
 
+## Visor en vivo
+
+Cada tarjeta de pista con pasos disponibles (`stepsSupported`) suma un botón
+**VER** / **OCULTAR** en su encabezado. Con el visor abierto, la página consulta
+`GET /api/steps?project=<id>&worker=<pista>&since=<último id>` cada 2 segundos
+(se detiene con el visor cerrado y cuando la pestaña no está visible) y
+reproduce lo que hizo el agente con una animación de tipeo simulada: el texto
+llega completo recién al terminar cada herramienta, así que se anima después,
+como en Roo Code. La elección de abierto/cerrado por pista se recuerda en
+`localStorage` y el refresco de 5 segundos del tablero nunca reinicia la
+animación.
+
+- **Pestañas**: cada archivo (escrituras, ediciones y lecturas del mismo
+  archivo comparten una), cada comando (`$ <comando>`), cada llamada a memoria
+  (`mem: <título o consulta>`), cada otra herramienta, y una pestaña
+  **mensajes** para los textos. El nombre del archivo va como etiqueta y la
+  ruta completa en el tooltip. Hay como máximo 12 pestañas: al superar el
+  límite se descarta la más vieja que no esté activa. El color de cada pestaña
+  sigue el estado del último paso (ámbar trabajando, verde terminado, rojo
+  error) y el botón `▾` / `▸` pliega el visor hasta dejar solo la tira de
+  pestañas.
+- **Seguir**: por defecto el visor acompaña al agente y cada paso nuevo activa
+  su pestaña. Al hacer clic en una pestaña queda fijada y el seguimiento se
+  apaga; **SEGUIR** lo vuelve a encender.
+- **Reproducción**: los pasos se animan en orden, uno por vez, y ninguno tarda
+  más de ~3 segundos sin importar cuánto texto tenga. Si se acumulan más de 5
+  pasos, los más viejos se completan al instante para alcanzar al agente, y
+  **SALTAR** completa la animación actual. Con `prefers-reduced-motion` todo
+  aparece de inmediato.
+- **Visores**: escrituras y ediciones como hoja de código con números de línea
+  (la edición muestra primero el texto viejo tachado y después tipea el nuevo);
+  lecturas como una línea "leído" con un barrido sutil; mensajes en un panel
+  simple; comandos, memoria y otras herramientas como ficha genérica con sus
+  campos importantes. Un paso `running` sin contenido muestra **escribiendo…**
+  y se reemplaza cuando llega terminado, y `truncated: true` avisa
+  **contenido recortado**. El resaltado de sintaxis es propio (sin librerías)
+  para JS/TS, JSON, CSS, HTML, Markdown, PowerShell, Python y shell; las
+  extensiones desconocidas quedan en texto plano.
+- Todo el contenido de los agentes se inserta como texto (`textContent`), nunca
+  como HTML, y todos los colores salen de los tokens del tema. La mini terminal
+  con colores ANSI y la ficha de memoria dedicada son la parte B.
+
 ## Traducciones y resúmenes
 
 Los commits en git siguen en inglés; el panel traduce **solo la vista** con un

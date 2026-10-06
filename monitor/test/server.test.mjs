@@ -90,6 +90,32 @@ test("resolveStaticFile keeps every file inside the public root", () => {
   assert.equal(resolveStaticFile(root, "/fonts/%E0%A4%A.woff2"), null);
 });
 
+test("the handler serves the page modules and refuses to escape /js/", async () => {
+  assert.equal(routeRequest("GET", "/js/live-view.mjs"), "script");
+  assert.equal(routeRequest("HEAD", "/js/live-view.mjs"), "script");
+  const handler = createRequestHandler({});
+
+  const script = mockResponse();
+  await handler(request("GET", "/js/live-view.mjs"), script);
+  assert.equal(script.status, 200);
+  assert.match(script.headers["Content-Type"], /text\/javascript/);
+  assert.ok(script.body.length > 1000);
+  assert.equal(script.headers["X-Content-Type-Options"], "nosniff");
+
+  const head = mockResponse();
+  await handler(request("HEAD", "/js/live-view.mjs"), head);
+  assert.equal(head.status, 200);
+  assert.equal(head.body, undefined);
+
+  const escaping = mockResponse();
+  await handler(request("GET", "/js/..%2f..%2fserver.mjs"), escaping);
+  assert.equal(escaping.status, 404);
+
+  const unknown = mockResponse();
+  await handler(request("GET", "/js/evil.exe"), unknown);
+  assert.equal(unknown.status, 404);
+});
+
 test("the handler serves the bundled font and rejects unknown or escaping paths", async () => {
   const handler = createRequestHandler({});
   const font = mockResponse();
