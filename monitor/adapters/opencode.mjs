@@ -8,6 +8,7 @@ import fs from "node:fs";
 import { promisify } from "node:util";
 
 import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { buildProgress, withActivityProgress } from "../lib/progress.mjs";
 import { capStep, commandStep, lastSteps, memoryAction, memoryStep, numberOrNull, stepStatus, toolTitle } from "../lib/steps.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -306,12 +307,37 @@ export async function usage(ctx = {}) {
   });
 }
 
+// The session's `todowrite` tool calls are the checklist the agent keeps. The
+// latest call wins; the first one dates the planning. Pure; exported for tests.
+export function progressFromMessages(messages) {
+  let firstAt = null;
+  let latest = null;
+  let lastStepAt = null;
+  for (const message of messages ?? []) {
+    const ms = Number(message?.info?.time?.completed ?? message?.info?.time?.created);
+    const time = Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null;
+    if (time && (!lastStepAt || time > lastStepAt)) lastStepAt = time;
+    for (const part of message?.parts ?? []) {
+      if (part?.type !== "tool" || String(part.tool ?? "").toLowerCase() !== "todowrite") continue;
+      const todos = part.state?.input?.todos;
+      if (!Array.isArray(todos)) continue;
+      if (!firstAt) firstAt = time;
+      latest = { todos };
+    }
+  }
+  return {
+    progress: latest ? buildProgress({ todos: latest.todos, firstAt, lastStepAt }) : null,
+    lastStepAt
+  };
+}
+
 export async function activity(worker, ctx = {}) {
   try {
     const { messages, notice } = await fetchSessionMessages(worker, ctx);
     if (notice) return { events: [], notice };
     const events = mapOpenCodeMessages(messages, ctx).slice(-15);
-    return { events, notice: events.length ? null : "sin eventos" };
+    const { progress, lastStepAt } = progressFromMessages(messages);
+    return withActivityProgress({ events, notice: events.length ? null : "sin eventos" }, progress, lastStepAt);
   } catch {
     return { events: [], notice: "sin sesión activa" };
   }

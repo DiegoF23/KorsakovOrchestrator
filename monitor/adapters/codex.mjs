@@ -9,6 +9,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { buildProgress, withActivityProgress } from "../lib/progress.mjs";
 import { capStep, commandStep, hashId, lastSteps, memoryAction, memoryStep, numberOrNull, stepStatus, toolTitle } from "../lib/steps.mjs";
 
 export const id = "codex";
@@ -693,6 +694,63 @@ export async function usage(ctx = {}) {
   }
 }
 
+const PLAN_CALL_NAMES = new Set(["update_plan", "plan"]);
+
+// The codex `update_plan` tool calls are the checklist the agent keeps: the
+// latest call wins and the first one dates the planning. Both envelope shapes
+// are accepted (rollout `response_item` and kit-log `item.*`, plus the plan
+// call embedded in an `exec` program). The kit log carries no timestamps, so
+// `options.fallbackTime` (the file mtime) dates those entries. Pure; exported
+// for tests.
+export function progressFromEntries(entries, options = {}) {
+  const fallbackTime = toIsoOrNull(options.fallbackTime);
+  let firstAt = null;
+  let latest = null;
+  let lastStepAt = null;
+  for (const { item, time } of codexItems(entries)) {
+    const at = toIsoOrNull(time) ?? fallbackTime;
+    if (at && (!lastStepAt || at > lastStepAt)) lastStepAt = at;
+    for (const todos of codexPlanTodosFromItem(item)) {
+      if (!firstAt) firstAt = at;
+      latest = { todos };
+    }
+  }
+  return {
+    progress: latest ? buildProgress({ todos: latest.todos, firstAt, lastStepAt }) : null,
+    lastStepAt
+  };
+}
+
+function codexPlanTodosFromItem(item) {
+  const name = String(item?.name ?? item?.tool ?? "").toLowerCase();
+  const inputs = [];
+  if (COMMAND_CALLS.has(name)) {
+    for (const call of extractToolCalls(codexCallInput(item).text)) {
+      if (PLAN_CALL_NAMES.has(String(call.name ?? "").toLowerCase())) inputs.push(call.args ?? {});
+    }
+  } else if (PLAN_CALL_NAMES.has(name)) {
+    const input = item?.input ?? item?.arguments ?? "";
+    const args = input && typeof input === "object" ? input : parseCallObject(input);
+    if (args) inputs.push(args);
+  }
+  const lists = [];
+  for (const args of inputs) {
+    const todos = codexPlanTodos(args);
+    if (todos) lists.push(todos);
+  }
+  return lists;
+}
+
+// update_plan carries `plan` (the documented shape); `steps` and `todos` are
+// accepted aliases, and a bare string step counts as pending.
+function codexPlanTodos(args) {
+  const list = ["plan", "steps", "todos"]
+    .map((key) => (Array.isArray(args?.[key]) ? args[key] : null))
+    .find(Boolean);
+  if (!list) return null;
+  return list.map((entry) => (entry && typeof entry === "object" ? entry : { step: entry, status: "pending" }));
+}
+
 export async function activity(worker, ctx = {}) {
   const kitDir = ctx.kitDir;
   if (!kitDir || !worker?.name) return { events: [], notice: "sin actividad visible" };
@@ -701,6 +759,7 @@ export async function activity(worker, ctx = {}) {
     if (!newest) return { events: [], notice: "todavía no hay log" };
     const at = new Date(newest.mtimeMs).toISOString();
     const events = [];
+    const entries = [];
     for (const line of readTail(newest.full, 128 * 1024).split(/\r?\n/)) {
       if (!line.startsWith("{")) continue;
       let event;
@@ -709,9 +768,11 @@ export async function activity(worker, ctx = {}) {
       } catch {
         continue;
       }
+      entries.push(event);
       for (const mapped of mapCodexLogLine(event, ctx)) events.push({ time: at, ...mapped });
     }
-    return { events: events.slice(-15), notice: events.length ? null : "sin eventos" };
+    const { progress, lastStepAt } = progressFromEntries(entries, { fallbackTime: at });
+    return withActivityProgress({ events: events.slice(-15), notice: events.length ? null : "sin eventos" }, progress, lastStepAt);
   } catch {
     return { events: [], notice: "sin actividad visible" };
   }
@@ -763,6 +824,11 @@ function parseDate(value) {
   if (!value) return null;
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function toIsoOrNull(value) {
+  const date = parseDate(value);
+  return date ? date.toISOString() : null;
 }
 
 function stripPowershellWrapper(command) {

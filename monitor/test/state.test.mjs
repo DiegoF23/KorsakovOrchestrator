@@ -121,6 +121,51 @@ test("a Claude track wires its model, effort and activityFile into the card", as
   assert.equal(workers[0].activity.notice, null);
 });
 
+test("a Claude card exposes the todo progress, the measured remaining and the idle warning", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-claude-progress-"));
+  const transcript = path.join(dir, "agent.jsonl");
+  fs.copyFileSync(path.join(here, "fixtures", "claude-progress.jsonl"), transcript);
+  fs.writeFileSync(
+    path.join(dir, "status-claude-p.json"),
+    JSON.stringify({ state: "running", pid: process.pid, time: "2026-10-04T11:59:30.000Z" })
+  );
+
+  const workers = await buildWorkers({
+    kit: {
+      tracks: [
+        { name: "claude-p", engine: "claude-code", title: "progreso de prueba", activityFile: transcript, board: true }
+      ]
+    },
+    kitDir: dir,
+    config: { __baseDir: dir, orchestrator: {} },
+    repo: null,
+    worktreeParent: null,
+    now: new Date("2026-10-04T12:00:00Z")
+  });
+
+  assert.equal(workers.length, 1);
+  const card = workers[0];
+  assert.equal(card.stateKind, "working");
+  assert.deepEqual(card.progress, {
+    items: [
+      { text: "leer el brief", status: "done" },
+      { text: "escribir el parser", status: "done" },
+      { text: "correr las pruebas", status: "doing" }
+    ],
+    done: 2,
+    total: 3,
+    current: "correr las pruebas",
+    firstAt: "2026-10-04T10:00:02.000Z",
+    lastStepAt: "2026-10-04T10:07:00.000Z"
+  });
+  // rate = (12:00 - 10:00:02) / 2 done; one item left -> ~59:59.
+  assert.equal(card.remaining, "~59:59");
+  assert.equal(card.pace, null, "without etaEnd there is no pace");
+  assert.equal(card.lastStepAt, "2026-10-04T10:07:00.000Z");
+  assert.equal(card.idleText, "sin movimiento hace 113 min");
+  assert.equal(card.title, "CLAUDE - progreso de prueba - ~59:59");
+});
+
 test("an Antigravity track wires its model and activityFile into the card", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-agy-"));
   const transcript = path.join(dir, "agent.ndjson");
