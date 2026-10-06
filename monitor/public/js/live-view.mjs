@@ -23,6 +23,9 @@ export const MAX_BLOCKS_PER_TAB = 40;
 const STICK_THRESHOLD_PX = 24;
 // Step ids remembered per worker to build the next `since`.
 export const MAX_KNOWN_STEPS = 400;
+// Characters of a finished reasoning that are typed; the rest stays behind the
+// "ver todo" toggle and is revealed instantly.
+export const THINKING_MAX_CHARS = 4000;
 
 // The `since` sent to /api/steps: the id just before the first step that is
 // still running, so a running step keeps coming back until it finishes (its
@@ -61,6 +64,12 @@ function shorten(value, max = 60) {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
 
+function finiteOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 export function basename(filePath) {
   const normalized = String(filePath ?? "").replace(/\\/g, "/");
   return normalized.slice(normalized.lastIndexOf("/") + 1) || normalized;
@@ -88,6 +97,7 @@ export function stepTabKey(step) {
   }
   if (type === "command") return `cmd:${String(step?.id ?? "")}`;
   if (type === "memory") return `mem:${String(step?.id ?? "")}`;
+  if (type === "thinking") return "thinking";
   if (type === "message") return "messages";
   return `tool:${String(step?.id ?? "")}`;
 }
@@ -103,6 +113,7 @@ export function stepTabLabel(step) {
     const hint = data.title || data.query || data.action || "memoria";
     return `mem: ${shorten(hint, 36)}`;
   }
+  if (type === "thinking") return "pensando";
   if (type === "message") return "mensajes";
   return shorten(step?.tool || type, 24);
 }
@@ -113,6 +124,7 @@ export function stepTabTitle(step) {
   if ((type === "write" || type === "edit" || type === "read") && step?.path) return String(step.path);
   if (type === "command") return String(data.command ?? step?.title ?? "");
   if (type === "memory") return String(data.title || data.query || step?.title || "");
+  if (type === "thinking") return "razonamiento del modelo";
   return String(step?.title ?? step?.tool ?? type);
 }
 
@@ -155,6 +167,21 @@ export function typingPlan(length, options = {}) {
 // viewer catches up with the agent.
 export function catchUpCount(queued, limit = QUEUE_LIMIT) {
   return Math.max(0, Math.floor(Number(queued) || 0) - limit);
+}
+
+// "m:ss" for an elapsed time in ms; minutes are never capped ("61:00").
+export function formatElapsed(ms) {
+  const seconds = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+// Splits reasoning text into the part the viewer types and the part the "ver
+// todo" toggle reveals instantly; text within the cap stays whole.
+export function splitThinkingText(text, max = THINKING_MAX_CHARS) {
+  const source = String(text ?? "");
+  const limit = Math.max(0, Math.floor(Number(max) || 0));
+  if (source.length <= limit) return { visible: source, hidden: "" };
+  return { visible: source.slice(0, limit), hidden: source.slice(limit) };
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +433,8 @@ export function memoryProse(text) {
 
 // Viewer registry: each step type names the replay the DOM half must build.
 // `blocks` is the part A script (files and messages), the dedicated terminal,
-// memory and tool cards are part B, and unknown types fall back to blocks.
+// memory, tool and thinking cards are part B, and unknown types fall back to
+// blocks.
 export const VIEWERS = {
   write: "blocks",
   edit: "blocks",
@@ -415,6 +443,7 @@ export const VIEWERS = {
   command: "terminal",
   memory: "memory",
   tool: "tool",
+  thinking: "thinking",
   generic: "blocks"
 };
 
@@ -707,6 +736,7 @@ export function init(options = {}) {
       queue: [],
       steps: new Map(),
       order: [],
+      thinkTimers: new Set(),
       animating: false,
       skipCurrent: false,
       inFlight: false,
@@ -978,7 +1008,9 @@ export function init(options = {}) {
           ? buildTerminalViewer(state, step)
           : viewer === "memory"
             ? buildMemoryViewer(state, step)
-            : buildToolViewer(state, step);
+            : viewer === "thinking"
+              ? buildThinkingViewer(state, step)
+              : buildToolViewer(state, step);
       wrap.appendChild(item.el);
       playItems(state, [item], instant, done);
       return;
@@ -1425,6 +1457,109 @@ export function init(options = {}) {
     state.rafId = win.requestAnimationFrame(frame);
   }
 
+  // -- thinking viewer: brain circuit, live counter and typed reasoning -----
+
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const THINK_NODES = [[3, 11], [11, 5], [11, 17], [19, 11], [27, 5], [27, 17], [35, 11]];
+  const THINK_LINKS = [[0, 1], [0, 2], [1, 3], [2, 3], [3, 4], [3, 5], [4, 6], [5, 6]];
+
+  function svgEl(tag, attributes) {
+    const node = doc.createElementNS(SVG_NS, tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
+    return node;
+  }
+
+  // The icon is pure DOM/SVG (never innerHTML): linked nodes plus, while the
+  // model reasons, one pulse per line whose CSS animation travels along it.
+  // Every colour comes from the state and glow tokens; the global
+  // reduced-motion rule freezes the pulses without touching the counter.
+  function buildThinkingIcon(running) {
+    const icon = svgEl("svg", {
+      viewBox: "0 0 38 22",
+      class: `think-icon ${running ? "think-running" : "think-done"}`,
+      "aria-hidden": "true"
+    });
+    THINK_LINKS.forEach(([from, to], index) => {
+      const geometry = {
+        x1: THINK_NODES[from][0],
+        y1: THINK_NODES[from][1],
+        x2: THINK_NODES[to][0],
+        y2: THINK_NODES[to][1]
+      };
+      icon.appendChild(svgEl("line", { ...geometry, class: "think-link" }));
+      if (running) {
+        const pulse = svgEl("line", { ...geometry, class: "think-pulse" });
+        pulse.style.animationDelay = `${(index % 4) * 0.45}s`;
+        icon.appendChild(pulse);
+      }
+    });
+    for (const [cx, cy] of THINK_NODES) icon.appendChild(svgEl("circle", { cx, cy, r: 1.7, class: "think-node" }));
+    return icon;
+  }
+
+  // One interval per running viewer, ticking the elapsed time every second.
+  // It stops as soon as its node leaves the document: the step was replaced by
+  // its finished version, or the viewer was destroyed.
+  function startThinkingClock(state, node, startedAt) {
+    const timer = win.setInterval(() => {
+      if (!node.isConnected) {
+        win.clearInterval(timer);
+        state.thinkTimers.delete(timer);
+        return;
+      }
+      node.textContent = `pensando ${formatElapsed(Date.now() - startedAt)}`;
+    }, 1000);
+    state.thinkTimers.add(timer);
+  }
+
+  // Thinking card: running shows the animated icon and "pensando m:ss"; done
+  // swaps it for a static icon, adds "pensó m:ss" when timing is known and
+  // types the reasoning. Beyond THINKING_MAX_CHARS only the head is typed and
+  // the "ver todo" toggle reveals the rest instantly.
+  function buildThinkingViewer(state, step) {
+    const data = step?.data ?? {};
+    const running = String(step?.status ?? "done") === "running";
+    const text = String(data.text ?? "");
+    const startedAt = finiteOrNull(data.startedAt);
+    const endedAt = finiteOrNull(data.endedAt);
+    const box = el(doc, "div", "live-thinking");
+    const head = el(doc, "div", "think-head");
+    head.appendChild(buildThinkingIcon(running));
+    const status = el(doc, "span", "think-status");
+    head.appendChild(status);
+    box.appendChild(head);
+    if (step?.truncated) box.appendChild(el(doc, "div", "live-notice", "contenido recortado"));
+    if (running) {
+      const from = startedAt ?? Date.now();
+      status.textContent = `pensando ${formatElapsed(Date.now() - from)}`;
+      startThinkingClock(state, status, from);
+    } else if (startedAt !== null && endedAt !== null && endedAt >= startedAt) {
+      status.textContent = `pensó ${formatElapsed(endedAt - startedAt)}`;
+    }
+    const { visible, hidden } = splitThinkingText(text);
+    const tasks = [];
+    if (visible) {
+      const pre = el(doc, "pre", "live-pre live-text think-text");
+      box.appendChild(pre);
+      tasks.push((instant, next) =>
+        typeText(state, pre, visible, instant, () => {
+          if (hidden) {
+            const more = el(doc, "button", "think-more", "ver todo");
+            more.type = "button";
+            more.addEventListener("click", () => {
+              pre.textContent = text;
+              more.remove();
+              followBottom(state);
+            });
+            box.appendChild(more);
+          }
+          next();
+        })
+      );
+    }
+    return { el: box, play: (instant, next) => runTasks(state, tasks, instant, next) };
+  }
+
   // Pretty-prints a JSON value with the keys in the accent token, using text
   // nodes and spans only.
   function renderJsonInto(node, value) {
@@ -1533,7 +1668,11 @@ export function init(options = {}) {
 
   return { attach, states, destroy() {
     doc.removeEventListener("visibilitychange", onVisibility);
-    for (const state of states.values()) stopPoll(state);
+    for (const state of states.values()) {
+      stopPoll(state);
+      for (const timer of state.thinkTimers) win.clearInterval(timer);
+      state.thinkTimers.clear();
+    }
     states.clear();
     openStates.clear();
   } };

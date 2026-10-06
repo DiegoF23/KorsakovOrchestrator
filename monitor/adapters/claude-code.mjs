@@ -231,6 +231,9 @@ export function mapClaudeSteps(entries, ctx = {}) {
       if (!part || typeof part !== "object") continue;
       if (part.type === "text") {
         if (assistant && part.text) steps.push(claudeTextStep(entry, index, time, part.text));
+      } else if (part.type === "thinking") {
+        const thinking = typeof part.thinking === "string" ? part.thinking : "";
+        if (assistant && thinking.trim()) steps.push(claudeThinkingStep(entry, index, time, thinking));
       } else if (part.type === "tool_use") {
         steps.push(claudeToolStep(part, results.get(String(part.id ?? "")) ?? null, time, index, ctx));
       }
@@ -248,6 +251,21 @@ function claudeTextStep(entry, index, time, text) {
     status: "done",
     title: firstSentence(text),
     data: { text }
+  });
+}
+
+// A thinking block is always finished by the time it reaches the transcript
+// and carries no timing of its own, so the viewer shows it without a duration.
+// Empty or redacted blocks are skipped instead of leaving an empty step.
+function claudeThinkingStep(entry, index, time, text) {
+  return capStep({
+    id: `think-${entry.uuid ?? entry.timestamp ?? "entry"}-${index}`,
+    time,
+    type: "thinking",
+    tool: "thinking",
+    status: "done",
+    title: "pensando",
+    data: { text, startedAt: null, endedAt: null }
   });
 }
 
