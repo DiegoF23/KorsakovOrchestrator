@@ -676,11 +676,13 @@ export function init(options = {}) {
     return `${STORAGE_PREFIX}${state.projectId ?? ""}.${state.worker.name ?? ""}`;
   }
 
+  // Viewers start open; only an explicit OCULTAR, remembered per worker,
+  // keeps one closed.
   function storedOpen(state) {
     try {
-      return win.localStorage.getItem(storageKey(state)) === "1";
+      return win.localStorage.getItem(storageKey(state)) !== "0";
     } catch {
-      return false;
+      return true;
     }
   }
 
