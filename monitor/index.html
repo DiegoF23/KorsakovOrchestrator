@@ -86,13 +86,20 @@
     gap: 4px 12px;
     min-width: 0;
   }
+  /* Film-style title: the Matrix logo is Times capitals, widely tracked and
+     sliced by thin horizontal lines. */
   h1 {
     margin: 0;
-    font-family: var(--font-display);
-    font-size: 20px;
-    letter-spacing: 2px;
-    color: var(--live);
-    text-shadow: 0 0 8px rgba(0, 255, 65, 0.55);
+    font-family: "Times New Roman", Times, serif;
+    font-weight: normal;
+    font-size: 22px;
+    text-transform: uppercase;
+    letter-spacing: 6px;
+    color: transparent;
+    background: repeating-linear-gradient(to bottom, var(--live) 0 3px, transparent 3px 4px);
+    -webkit-background-clip: text;
+    background-clip: text;
+    filter: drop-shadow(0 0 6px rgba(0, 255, 65, 0.55));
   }
   .dim { color: var(--dim); }
   .warn { color: var(--warn); }
@@ -1026,11 +1033,18 @@
         last = now;
         context.fillStyle = "rgba(0, 0, 0, 0.08)";
         context.fillRect(0, 0, canvas.width, canvas.height);
-        context.font = "15px monospace";
+        context.font = "15px 'MS Gothic', 'Yu Gothic', monospace";
+        context.fillStyle = "rgba(0, 255, 65, 0.85)";
         for (var i = 0; i < columns; i++) {
-          var text = String.fromCharCode(0x30a0 + Math.floor(Math.random() * 96));
-          context.fillStyle = "rgba(0, 255, 65, 0.85)";
-          context.fillText(text, i * 16, drops[i] * 16);
+          // Like the film: mirrored half-width katakana mixed with digits.
+          var text = Math.random() < 0.8
+            ? String.fromCharCode(0xff66 + Math.floor(Math.random() * 56))
+            : String(Math.floor(Math.random() * 10));
+          context.save();
+          context.translate(i * 16 + 14, drops[i] * 16);
+          context.scale(-1, 1);
+          context.fillText(text, 0, 0);
+          context.restore();
           if (drops[i] * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
           drops[i]++;
         }
