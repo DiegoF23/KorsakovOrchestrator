@@ -45,6 +45,17 @@ export const FILE_HEADERS = {
   "Content-Disposition": "inline"
 };
 
+// Headers for one file body. PDFs leave out the CSP: Chrome's built-in PDF
+// viewer refuses to render a document served with `sandbox`, and it runs the
+// PDF in its own isolated viewer, never as script in the monitor's origin.
+export function fileHeaders(contentType) {
+  if (contentType === "application/pdf") {
+    const { "Content-Security-Policy": _csp, ...rest } = FILE_HEADERS;
+    return rest;
+  }
+  return { ...FILE_HEADERS };
+}
+
 // image | video | audio | pdf | other, decided by extension only.
 export function kindOf(file) {
   const type = FILE_TYPES[path.extname(String(file)).toLowerCase()] ?? "";

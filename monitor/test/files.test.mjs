@@ -661,3 +661,10 @@ test("Explorer is started with an argument array, detached, without a shell", ()
   assert.deepEqual(seen[0][2], { detached: true, stdio: "ignore", windowsHide: false, shell: false });
   assert.equal(child.unrefs, 1);
 });
+
+test("PDFs are served without the sandbox CSP so Chrome's viewer can render them", async () => {
+  const { fileHeaders } = await import("../lib/files.mjs");
+  assert.equal(fileHeaders("application/pdf")["Content-Security-Policy"], undefined);
+  assert.equal(fileHeaders("application/pdf")["X-Content-Type-Options"], "nosniff");
+  assert.match(fileHeaders("image/svg+xml")["Content-Security-Policy"], /^sandbox;/);
+});

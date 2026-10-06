@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   explorerArguments,
-  FILE_HEADERS,
+  fileHeaders,
   FILE_TYPES,
   kindOf,
   listTree,
@@ -261,7 +261,7 @@ export function createRequestHandler(config, options = {}) {
 
     const start = range.type === "range" ? range.start : 0;
     const end = range.type === "range" ? range.end : size - 1;
-    const headers = { ...FILE_HEADERS, "Content-Type": type, "Accept-Ranges": "bytes", "Content-Length": String(size === 0 ? 0 : end - start + 1) };
+    const headers = { ...fileHeaders(type), "Content-Type": type, "Accept-Ranges": "bytes", "Content-Length": String(size === 0 ? 0 : end - start + 1) };
     if (range.type === "range") headers["Content-Range"] = `bytes ${start}-${end}/${size}`;
     response.writeHead(range.type === "range" ? 206 : 200, headers);
     if (request.method === "HEAD" || size === 0) {
