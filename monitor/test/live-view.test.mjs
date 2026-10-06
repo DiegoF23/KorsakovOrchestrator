@@ -4,20 +4,30 @@ import assert from "node:assert/strict";
 import {
   FRAME_MS,
   MAX_TABS,
+  MAX_TERMINAL_LINES,
+  MAX_TOOL_LINES,
   MIN_CHARS_PER_FRAME,
   TYPING_MAX_MS,
+  ansi256To16,
+  ansiLines,
+  capTerminalLines,
   catchUpCount,
   highlight,
   highlightPath,
   init,
   languageForPath,
+  memoryProse,
+  memoryResultRows,
+  parseAnsi,
   pollSince,
+  splitToolName,
   stepSignature,
   stepBlocks,
   stepTabKey,
   stepTabLabel,
   typingPlan,
-  upsertTab
+  upsertTab,
+  viewerFor
 } from "../public/js/live-view.mjs";
 
 function step(id, type, path, data = {}, extra = {}) {
@@ -205,6 +215,125 @@ test("stepBlocks describe each step type for the replay", () => {
 
   const running = stepBlocks(step("s10", "write", "C:\\repo\\a.ts", {}, { status: "running" }));
   assert.deepEqual(running, []);
+});
+
+const PLAIN = { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false };
+
+test("parseAnsi keeps plain text and applies the 16-colour SGR codes", () => {
+  assert.deepEqual(parseAnsi("hola"), [{ text: "hola", ...PLAIN }]);
+  const segments = parseAnsi("\u001b[31mrojo\u001b[0m y \u001b[92mbrillante\u001b[39m");
+  assert.equal(segments.length, 3);
+  assert.deepEqual(segments[0], { text: "rojo", ...PLAIN, fg: 1 });
+  assert.deepEqual(segments[1], { text: " y ", ...PLAIN });
+  assert.deepEqual(segments[2], { text: "brillante", ...PLAIN, fg: 10 });
+  assert.equal(parseAnsi("\u001b[mX")[0].fg, null, "an empty SGR is a reset");
+  assert.equal(parseAnsi("").length, 0);
+});
+
+test("parseAnsi handles bold, dim, italic, underline and their resets", () => {
+  const segments = parseAnsi("\u001b[1;3;4mX\u001b[22mY\u001b[23mZ\u001b[24mW");
+  assert.deepEqual(
+    segments.map((segment) => [segment.text, segment.bold, segment.dim, segment.italic, segment.underline]),
+    [
+      ["X", true, false, true, true],
+      ["Y", false, false, true, true],
+      ["Z", false, false, false, true],
+      ["W", false, false, false, false]
+    ]
+  );
+  const dim = parseAnsi("\u001b[2mdim\u001b[22mnormal");
+  assert.equal(dim[0].dim, true);
+  assert.equal(dim[1].dim, false);
+});
+
+test("parseAnsi applies background colours and maps 256-colour codes to the 16 slots", () => {
+  const segments = parseAnsi("\u001b[44mazul\u001b[104mclaro\u001b[49mfin");
+  assert.equal(segments[0].bg, 4);
+  assert.equal(segments[1].bg, 12);
+  assert.equal(segments[2].bg, null);
+
+  assert.equal(parseAnsi("\u001b[38;5;196mX")[0].fg, 9, "pure red 196 is bright red");
+  assert.equal(parseAnsi("\u001b[38;5;46mX")[0].fg, 10, "pure green 46 is bright green");
+  assert.equal(parseAnsi("\u001b[48;5;21mX")[0].bg, 4, "pure blue 21 is the normal blue slot");
+  assert.equal(parseAnsi("\u001b[38;5;240mX")[0].fg, 8, "grey 240 is the dark grey slot");
+  assert.equal(parseAnsi("\u001b[38;5;9mX")[0].fg, 9, "0..15 map to themselves");
+  assert.equal(ansi256To16(300), null);
+  assert.equal(ansi256To16("nope"), null);
+});
+
+test("parseAnsi strips every non-SGR escape sequence", () => {
+  const segments = parseAnsi("a\u001b[2Kb\u001b[1Ac\u001b]0;title\u001b\\d\u001b[?25le\u001b");
+  assert.equal(segments.map((segment) => segment.text).join(""), "abcde");
+  assert.equal(segments.some((segment) => segment.text.includes("\u001b")), false);
+  const unknown = parseAnsi("\u001b[5;7mX");
+  assert.equal(unknown[0].text, "X", "unknown SGR codes are ignored, not shown");
+});
+
+test("ansiLines splits styled segments into lines and capTerminalLines reports the cut", () => {
+  const lines = ansiLines("\u001b[31mrojo\nverde\u001b[0m");
+  assert.equal(lines.length, 2);
+  assert.deepEqual(lines[0], [{ text: "rojo", ...PLAIN, fg: 1 }]);
+  assert.deepEqual(lines[1], [{ text: "verde", ...PLAIN, fg: 1 }]);
+  assert.equal(MAX_TERMINAL_LINES, 400);
+  assert.equal(MAX_TOOL_LINES, 200);
+
+  const all = Array.from({ length: 500 }, (_, index) => `linea ${index}`).join("\n");
+  const capped = capTerminalLines(all);
+  assert.equal(capped.hidden, 100);
+  assert.equal(capped.text.split("\n").length, MAX_TERMINAL_LINES);
+  assert.equal(capped.text.startsWith("linea 100"), true);
+  assert.deepEqual(capTerminalLines("una\ndos"), { text: "una\ndos", hidden: 0 });
+  assert.equal(capTerminalLines(Array.from({ length: 10 }, () => "x").join("\n"), 3).hidden, 7);
+});
+
+test("memoryResultRows finds titled items in JSON lists and falls back to text otherwise", () => {
+  assert.deepEqual(memoryResultRows('[{"id":7,"title":"Auth","type":"decision"},{"id":8,"title":"Steps"}]'), [
+    { title: "Auth", type: "decision", id: 7 },
+    { title: "Steps", type: null, id: 8 }
+  ]);
+  assert.deepEqual(memoryResultRows('{"results":[{"title":"Uno","memoryType":"pattern"}]}'), [
+    { title: "Uno", type: "pattern", id: null }
+  ]);
+  assert.deepEqual(memoryResultRows('{"observations":[{"title":"Dos"}]}'), [{ title: "Dos", type: null, id: null }]);
+  assert.deepEqual(memoryResultRows([{ title: "Top" }]), [{ title: "Top", type: null, id: null }]);
+
+  assert.equal(memoryResultRows("texto plano"), null);
+  assert.equal(memoryResultRows("Saved memory ab12"), null);
+  assert.equal(memoryResultRows('{"nada":1}'), null);
+  assert.equal(memoryResultRows('["sin titulo"]'), null);
+  assert.equal(memoryResultRows(null), null);
+});
+
+test("splitToolName separates the mcp server prefix from the tool name", () => {
+  assert.deepEqual(splitToolName("mcp__engram__mem_save"), { server: "engram", name: "mem_save" });
+  assert.deepEqual(splitToolName("mcp__plugin_engram_engram__mem_search"), {
+    server: "plugin_engram_engram",
+    name: "mem_search"
+  });
+  assert.deepEqual(splitToolName("task"), { server: null, name: "task" });
+  assert.deepEqual(splitToolName(""), { server: null, name: "" });
+});
+
+test("memoryProse marks the markdown bold labels and keeps the rest plain", () => {
+  assert.deepEqual(memoryProse("**What**: algo\n**Why**: otra"), [
+    { text: "What", label: true },
+    { text: ": algo\n", label: false },
+    { text: "Why", label: true },
+    { text: ": otra", label: false }
+  ]);
+  assert.deepEqual(memoryProse("sin etiquetas"), [{ text: "sin etiquetas", label: false }]);
+});
+
+test("the viewer registry maps each step type to its dedicated viewer", () => {
+  assert.equal(viewerFor({ type: "command" }), "terminal");
+  assert.equal(viewerFor({ type: "memory" }), "memory");
+  assert.equal(viewerFor({ type: "tool" }), "tool");
+  assert.equal(viewerFor({ type: "write" }), "blocks");
+  assert.equal(viewerFor({ type: "edit" }), "blocks");
+  assert.equal(viewerFor({ type: "read" }), "blocks");
+  assert.equal(viewerFor({ type: "message" }), "blocks");
+  assert.equal(viewerFor({ type: "unknown" }), "blocks");
+  assert.equal(viewerFor(null), "blocks");
 });
 
 test("init without a DOM returns null so node can import the module", () => {

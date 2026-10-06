@@ -1,13 +1,17 @@
-// Live viewer (part A) for the typed steps served by GET /api/steps.
+// Live viewer for the typed steps served by GET /api/steps.
 //
 // The pure half of this module (tab keys, the 12-tab cap, the typing plan,
-// queue catch-up, the built-in highlighter and the per-type block script) has
-// no DOM dependency, so `node --test` imports it directly. The DOM half lives
-// behind init(), which the page reaches through window.FleetLiveView: every
-// worker card with stepsSupported gets a VER/OCULTAR button and, when open, a
-// viewer that polls /api/steps every 2 s and replays the steps with a
-// simulated typing animation. Step content comes from agents, so it never
-// reaches the DOM as HTML: every value is a text node built with textContent.
+// queue catch-up, the built-in highlighter, the per-type block script and the
+// part B helpers: ANSI parser, line caps, memory result rows and tool names)
+// has no DOM dependency, so `node --test` imports it directly. The DOM half
+// lives behind init(), which the page reaches through window.FleetLiveView:
+// every worker card with stepsSupported gets a VER/OCULTAR button and, when
+// open, a viewer that polls /api/steps every 2 s and replays the steps with a
+// simulated typing animation. The viewer registry maps each step type to its
+// replay: the part A block script for files and messages, and the dedicated
+// terminal, memory and tool cards of part B. Step content comes from agents,
+// so it never reaches the DOM as HTML: every value is a text node built with
+// textContent.
 
 export const MAX_TABS = 12;
 export const QUEUE_LIMIT = 5;
@@ -151,6 +155,271 @@ export function typingPlan(length, options = {}) {
 // viewer catches up with the agent.
 export function catchUpCount(queued, limit = QUEUE_LIMIT) {
   return Math.max(0, Math.floor(Number(queued) || 0) - limit);
+}
+
+// ---------------------------------------------------------------------------
+// Mini-terminal helpers (part B): ANSI parsing, line caps and card data
+// ---------------------------------------------------------------------------
+
+export const MAX_TERMINAL_LINES = 400;
+export const MAX_TOOL_LINES = 200;
+
+// The 16 classic ANSI colours in RGB, used only to pick the nearest theme slot
+// for a 256-colour code. The paint always comes from --ansi-N.
+const ANSI_16_RGB = [
+  [0, 0, 0],
+  [205, 0, 0],
+  [0, 205, 0],
+  [205, 205, 0],
+  [0, 0, 238],
+  [205, 0, 205],
+  [0, 205, 205],
+  [229, 229, 229],
+  [127, 127, 127],
+  [255, 0, 0],
+  [0, 255, 0],
+  [255, 255, 0],
+  [92, 92, 255],
+  [255, 0, 255],
+  [0, 255, 255],
+  [255, 255, 255]
+];
+
+// Maps a 256-colour index to the nearest of the 16 theme slots. 0..15 map to
+// themselves; 16..231 are the 6x6x6 cube and 232..255 the grey ramp.
+export function ansi256To16(index) {
+  const value = Math.trunc(Number(index));
+  if (!Number.isFinite(value) || value < 0 || value > 255) return null;
+  if (value < 16) return value;
+  let rgb;
+  if (value < 232) {
+    const rest = value - 16;
+    const level = (channel) => (channel === 0 ? 0 : 55 + channel * 40);
+    rgb = [level(Math.floor(rest / 36)), level(Math.floor((rest % 36) / 6)), level(rest % 6)];
+  } else {
+    const grey = 8 + (value - 232) * 10;
+    rgb = [grey, grey, grey];
+  }
+  let best = 0;
+  let bestDistance = Infinity;
+  for (let slot = 0; slot < ANSI_16_RGB.length; slot += 1) {
+    const [red, green, blue] = ANSI_16_RGB[slot];
+    const distance = (red - rgb[0]) ** 2 + (green - rgb[1]) ** 2 + (blue - rgb[2]) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = slot;
+    }
+  }
+  return best;
+}
+
+function sgrState() {
+  return { fg: null, bg: null, bold: false, dim: false, italic: false, underline: false };
+}
+
+// Applies one SGR parameter list to the running style state. Unknown codes are
+// ignored; `38;5;n` / `48;5;n` map to a slot of the 16-colour palette and
+// `38;2;r;g;b` (truecolor) is consumed but not painted.
+function applySgr(params, state) {
+  const codes = params === "" ? [0] : params.split(";").map((piece) => (piece === "" ? 0 : Number(piece)));
+  for (let index = 0; index < codes.length; index += 1) {
+    const code = codes[index];
+    if (!Number.isFinite(code)) continue;
+    if (code === 0) Object.assign(state, sgrState());
+    else if (code === 1) state.bold = true;
+    else if (code === 2) state.dim = true;
+    else if (code === 3) state.italic = true;
+    else if (code === 4) state.underline = true;
+    else if (code === 22) {
+      state.bold = false;
+      state.dim = false;
+    } else if (code === 23) state.italic = false;
+    else if (code === 24) state.underline = false;
+    else if (code >= 30 && code <= 37) state.fg = code - 30;
+    else if (code >= 90 && code <= 97) state.fg = code - 90 + 8;
+    else if (code === 39) state.fg = null;
+    else if (code >= 40 && code <= 47) state.bg = code - 40;
+    else if (code >= 100 && code <= 107) state.bg = code - 100 + 8;
+    else if (code === 49) state.bg = null;
+    else if (code === 38 || code === 48) {
+      const mode = codes[index + 1];
+      if (mode === 5) {
+        const slot = ansi256To16(codes[index + 2]);
+        if (code === 38) state.fg = slot;
+        else state.bg = slot;
+        index += 2;
+      } else if (mode === 2) {
+        index += 4;
+      }
+    }
+  }
+}
+
+// Pure SGR ANSI parser: each segment is { text, fg, bg, bold, dim, italic,
+// underline } with fg/bg a --ansi-N slot (0..15) or null. Non-SGR escape
+// sequences (cursor moves, erases, OSC titles) are stripped, never shown, and
+// adjacent segments with the same style are merged.
+export function parseAnsi(text) {
+  const source = String(text ?? "");
+  const segments = [];
+  const state = sgrState();
+  const push = (value) => {
+    if (!value) return;
+    const last = segments[segments.length - 1];
+    if (
+      last &&
+      last.fg === state.fg &&
+      last.bg === state.bg &&
+      last.bold === state.bold &&
+      last.dim === state.dim &&
+      last.italic === state.italic &&
+      last.underline === state.underline
+    ) {
+      last.text += value;
+      return;
+    }
+    segments.push({ text: value, fg: state.fg, bg: state.bg, bold: state.bold, dim: state.dim, italic: state.italic, underline: state.underline });
+  };
+  let index = 0;
+  while (index < source.length) {
+    if (source[index] !== "\u001b") {
+      const escapeAt = source.indexOf("\u001b", index);
+      const end = escapeAt < 0 ? source.length : escapeAt;
+      push(source.slice(index, end));
+      index = end;
+      continue;
+    }
+    const kind = source[index + 1];
+    if (kind === "[") {
+      let cursor = index + 2;
+      while (cursor < source.length && (source.charCodeAt(cursor) < 0x40 || source.charCodeAt(cursor) > 0x7e)) cursor += 1;
+      if (cursor >= source.length) break;
+      if (source[cursor] === "m") applySgr(source.slice(index + 2, cursor), state);
+      index = cursor + 1;
+      continue;
+    }
+    if (kind === "]") {
+      let cursor = index + 2;
+      while (cursor < source.length) {
+        if (source[cursor] === "\u0007") {
+          cursor += 1;
+          break;
+        }
+        if (source[cursor] === "\u001b" && source[cursor + 1] === "\\") {
+          cursor += 2;
+          break;
+        }
+        cursor += 1;
+      }
+      index = cursor;
+      continue;
+    }
+    index += kind === undefined ? 1 : 2;
+  }
+  return segments;
+}
+
+// Splits parsed segments into visual lines, keeping the style of each piece.
+export function ansiLines(text) {
+  const lines = [[]];
+  for (const segment of parseAnsi(text)) {
+    const pieces = segment.text.split("\n");
+    for (let index = 0; index < pieces.length; index += 1) {
+      if (index > 0) lines.push([]);
+      if (pieces[index]) lines[lines.length - 1].push({ ...segment, text: pieces[index] });
+    }
+  }
+  return lines;
+}
+
+// Keeps at most `max` lines; `hidden` tells the viewer how many fell off the
+// top so it can show the "… N líneas anteriores" note.
+export function capTerminalLines(text, max = MAX_TERMINAL_LINES) {
+  const limit = Math.max(1, Math.floor(Number(max) || MAX_TERMINAL_LINES));
+  const lines = String(text ?? "").split(/\r?\n/);
+  if (lines.length <= limit) return { text: lines.join("\n"), hidden: 0 };
+  return { text: lines.slice(-limit).join("\n"), hidden: lines.length - limit };
+}
+
+// Engram results reach the card as raw tool output, often a JSON string. Finds
+// the first list of items with a title among the common shapes (top-level
+// array, `results`, `observations`, `items`); null means "show raw text".
+const MEMORY_LIST_KEYS = ["results", "observations", "items"];
+
+export function memoryResultRows(results) {
+  let value = results;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object") return null;
+  let list = Array.isArray(value) ? value : null;
+  if (!list) {
+    for (const key of MEMORY_LIST_KEYS) {
+      if (Array.isArray(value[key])) {
+        list = value[key];
+        break;
+      }
+    }
+  }
+  if (!list) return null;
+  const rows = [];
+  for (const item of list) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    if (!title) continue;
+    rows.push({ title, type: item.type ?? item.memoryType ?? null, id: item.id ?? null });
+  }
+  return rows.length ? rows : null;
+}
+
+// "mcp__engram__mem_save" -> server "engram", name "mem_save"; a plain tool
+// name keeps no server chip.
+export function splitToolName(tool) {
+  const full = String(tool ?? "");
+  if (!full.startsWith("mcp__")) return { server: null, name: full };
+  const rest = full.slice(5);
+  const separator = rest.indexOf("__");
+  if (separator < 0) return { server: null, name: rest };
+  return { server: rest.slice(0, separator), name: rest.slice(separator + 2) };
+}
+
+// Splits memory text into plain and **label** pieces so the card can paint the
+// markdown-style labels in the accent token without a markdown library.
+export function memoryProse(text) {
+  const source = String(text ?? "");
+  const parts = [];
+  const regex = /\*\*([^*\n]+)\*\*/g;
+  let last = 0;
+  let match;
+  while ((match = regex.exec(source)) !== null) {
+    if (match.index > last) parts.push({ text: source.slice(last, match.index), label: false });
+    parts.push({ text: match[1], label: true });
+    last = match.index + match[0].length;
+  }
+  if (last < source.length) parts.push({ text: source.slice(last), label: false });
+  return parts;
+}
+
+// Viewer registry: each step type names the replay the DOM half must build.
+// `blocks` is the part A script (files and messages), the dedicated terminal,
+// memory and tool cards are part B, and unknown types fall back to blocks.
+export const VIEWERS = {
+  write: "blocks",
+  edit: "blocks",
+  read: "blocks",
+  message: "blocks",
+  command: "terminal",
+  memory: "memory",
+  tool: "tool",
+  generic: "blocks"
+};
+
+export function viewerFor(step) {
+  return VIEWERS[String(step?.type ?? "generic")] ?? VIEWERS.generic;
 }
 
 // ---------------------------------------------------------------------------
@@ -328,7 +597,8 @@ function pushBlock(blocks, kind, label, value, extra = {}) {
 
 // Describes what the viewer has to play for a step as an ordered list of
 // blocks: { kind, label, text, lang?, path? }. Pure, so the viewers stay easy
-// to test and to extend when part B adds the terminal and the memory card.
+// to test. It still serves files, messages and the generic fallback; command,
+// memory and tool types use their dedicated viewers declared in VIEWERS.
 export function stepBlocks(step) {
   const type = String(step?.type ?? "tool");
   const data = step?.data ?? {};
@@ -699,6 +969,18 @@ export function init(options = {}) {
     while (tabDom.content.childNodes.length > MAX_BLOCKS_PER_TAB) {
       tabDom.content.removeChild(tabDom.content.firstChild);
     }
+    const viewer = viewerFor(step);
+    if (viewer !== "blocks") {
+      const item =
+        viewer === "terminal"
+          ? buildTerminalViewer(state, step)
+          : viewer === "memory"
+            ? buildMemoryViewer(state, step)
+            : buildToolViewer(state, step);
+      wrap.appendChild(item.el);
+      playItems(state, [item], instant, done);
+      return;
+    }
     const blocks = stepBlocks(step);
     if (step.status === "running" && !blocks.length) {
       wrap.appendChild(el(doc, "div", "live-typing", "escribiendo…"));
@@ -844,6 +1126,360 @@ export function init(options = {}) {
       }
     }
     pre.replaceChildren(fragment);
+  }
+
+  // -- part B viewers: mini terminal, memory card and tool card -------------
+
+  // Types `text` into a node frame by frame (same plan as the code sheet) and
+  // runs `decorate` with the final node, so a caller can replace the plain
+  // typing with styled spans without ever touching innerHTML.
+  function typeText(state, node, text, instant, next, decorate) {
+    const finish = () => {
+      if (decorate) decorate(node, text);
+      else node.textContent = text;
+      followBottom(state);
+      next();
+    };
+    if (instant || !text.length) {
+      finish();
+      return;
+    }
+    const plan = typingPlan(text.length);
+    let index = 0;
+    const frame = () => {
+      if (state.skipCurrent) {
+        finish();
+        return;
+      }
+      index = Math.min(text.length, index + plan.charsPerFrame);
+      node.textContent = text.slice(0, index);
+      if (index >= text.length) {
+        finish();
+        return;
+      }
+      followBottom(state);
+      state.rafId = win.requestAnimationFrame(frame);
+    };
+    state.rafId = win.requestAnimationFrame(frame);
+  }
+
+  function runTasks(state, tasks, instant, next) {
+    let index = 0;
+    const step = () => {
+      if (index >= tasks.length) {
+        next();
+        return;
+      }
+      const task = tasks[index];
+      index += 1;
+      task(instant, step);
+    };
+    step();
+  }
+
+  function ansiSpan(segment) {
+    const span = el(doc, "span", "term-seg", segment.text);
+    if (segment.fg !== null && segment.fg !== undefined) span.style.color = `var(--ansi-${segment.fg})`;
+    if (segment.bg !== null && segment.bg !== undefined) span.style.background = `var(--ansi-${segment.bg})`;
+    if (segment.bold) span.classList.add("term-bold");
+    if (segment.dim) span.classList.add("term-dim");
+    if (segment.italic) span.classList.add("term-italic");
+    if (segment.underline) span.classList.add("term-underline");
+    return span;
+  }
+
+  // A dark console panel: the prompt and the command are typed, the output
+  // appears line by line (fast, bounded by the typing plan) and a final status
+  // line reports the exit code, or a blinking cursor while still running.
+  function buildTerminalViewer(state, step) {
+    const data = step?.data ?? {};
+    const box = el(doc, "div", "live-terminal");
+    const body = el(doc, "div", "term-body");
+    const commandLine = el(doc, "div", "term-line");
+    commandLine.appendChild(el(doc, "span", "term-prompt", "$ "));
+    const commandText = el(doc, "span", "term-cmd");
+    commandLine.appendChild(commandText);
+    body.appendChild(commandLine);
+    const output = el(doc, "div", "term-output");
+    body.appendChild(output);
+    box.appendChild(body);
+    if (step?.truncated) box.appendChild(el(doc, "div", "live-notice", "contenido recortado"));
+    return {
+      el: box,
+      play: (instant, done) => {
+        typeText(state, commandText, String(data.command ?? ""), instant, () => {
+          playTerminalOutput(state, output, step, instant, done);
+        });
+      }
+    };
+  }
+
+  function playTerminalOutput(state, output, step, instant, done) {
+    const data = step?.data ?? {};
+    const capped = capTerminalLines(data.output ?? "");
+    const lines = ansiLines(capped.text);
+    const rawLines = lines.map((line) => line.map((segment) => segment.text).join(""));
+    if (capped.hidden > 0) {
+      output.appendChild(el(doc, "div", "term-note", `… ${capped.hidden} líneas anteriores`));
+    }
+    const nodes = [];
+    const ensureLine = (index) => {
+      if (!nodes[index]) {
+        nodes[index] = el(doc, "div", "term-line");
+        output.appendChild(nodes[index]);
+      }
+      return nodes[index];
+    };
+    const paintLine = (index) => {
+      nodes[index].replaceChildren(...lines[index].map((segment) => ansiSpan(segment)));
+    };
+    const paintAll = () => {
+      for (let index = 0; index < lines.length; index += 1) {
+        ensureLine(index);
+        paintLine(index);
+      }
+      finishTerminal(output, step);
+      done();
+    };
+    const totalChars = rawLines.reduce((sum, line) => sum + line.length + 1, 0);
+    if (instant || totalChars === 0) {
+      paintAll();
+      return;
+    }
+    const plan = typingPlan(totalChars, { maxMs: 1500 });
+    let lineIndex = 0;
+    let charIndex = 0;
+    const frame = () => {
+      if (state.skipCurrent) {
+        paintAll();
+        return;
+      }
+      let budget = plan.charsPerFrame;
+      while (budget > 0 && lineIndex < rawLines.length) {
+        const raw = rawLines[lineIndex];
+        const node = ensureLine(lineIndex);
+        if (charIndex < raw.length) {
+          const advance = Math.min(budget, raw.length - charIndex);
+          charIndex += advance;
+          budget -= advance;
+          node.textContent = raw.slice(0, charIndex);
+        }
+        if (charIndex >= raw.length) {
+          paintLine(lineIndex);
+          lineIndex += 1;
+          charIndex = 0;
+          budget -= 1;
+        }
+      }
+      if (lineIndex >= rawLines.length) {
+        finishTerminal(output, step);
+        followBottom(state);
+        done();
+        return;
+      }
+      followBottom(state);
+      state.rafId = win.requestAnimationFrame(frame);
+    };
+    state.rafId = win.requestAnimationFrame(frame);
+  }
+
+  function finishTerminal(output, step) {
+    const data = step?.data ?? {};
+    if (String(step?.status ?? "done") === "running") {
+      const line = el(doc, "div", "term-line");
+      line.appendChild(el(doc, "span", "term-cursor"));
+      output.appendChild(line);
+      return;
+    }
+    const raw = data.exitCode;
+    const parsed = raw === null || raw === undefined || raw === "" ? null : Number(raw);
+    const code = Number.isFinite(parsed) ? parsed : null;
+    const kind = code === null ? "unknown" : code === 0 ? "done" : "error";
+    output.appendChild(el(doc, "div", `term-line term-status term-exit-${kind}`, code === null ? "exit ?" : `exit ${code}`));
+  }
+
+  // ENGRAM card: an animated memory icon plus the write shape (chips, title
+  // and content typed, markdown labels in the accent token) or the read shape
+  // (query typed, result rows when the JSON carries titles, raw text if not).
+  function buildMemoryViewer(state, step) {
+    const data = step?.data ?? {};
+    const action = String(data.action ?? "unknown");
+    const failed = String(step?.status ?? "") === "error";
+    const box = el(doc, "div", `live-memory${failed ? " mem-error" : ""}`);
+    const head = el(doc, "div", "mem-head");
+    head.appendChild(el(doc, "span", "mem-icon"));
+    head.appendChild(el(doc, "span", "mem-action", `ENGRAM · ${action}`));
+    box.appendChild(head);
+    if (step?.truncated) box.appendChild(el(doc, "div", "live-notice", "contenido recortado"));
+    const card = el(doc, "div", "mem-card");
+    box.appendChild(card);
+
+    if (failed) {
+      const errorText = textOf(data.results) || String(data.title ?? data.query ?? "error");
+      const error = el(doc, "div", "mem-error-text");
+      card.appendChild(error);
+      return { el: box, play: (instant, next) => typeText(state, error, errorText, instant, next) };
+    }
+
+    const tasks = [];
+    const write = ["save", "update", "session_summary"].includes(action);
+    if (write) {
+      if (data.memoryType) {
+        const chips = el(doc, "div", "mem-chips");
+        chips.appendChild(el(doc, "span", "mem-chip", String(data.memoryType)));
+        card.appendChild(chips);
+      }
+      if (data.title) {
+        const title = el(doc, "div", "mem-title-text");
+        card.appendChild(title);
+        tasks.push((instant, next) => typeText(state, title, String(data.title), instant, next));
+      }
+      if (data.content) {
+        const pre = el(doc, "pre", "mem-pre");
+        card.appendChild(pre);
+        tasks.push((instant, next) =>
+          typeText(state, pre, String(data.content), instant, next, (node, text) => {
+            node.replaceChildren(
+              ...memoryProse(text).map((part) => (part.label ? el(doc, "span", "mem-label", part.text) : doc.createTextNode(part.text)))
+            );
+          })
+        );
+      }
+    } else {
+      if (data.query) {
+        const query = el(doc, "div", "mem-query");
+        query.appendChild(el(doc, "span", "mem-query-label", "consulta: "));
+        const queryText = el(doc, "span", "mem-query-text");
+        query.appendChild(queryText);
+        card.appendChild(query);
+        tasks.push((instant, next) => typeText(state, queryText, String(data.query), instant, next));
+      }
+      const rows = memoryResultRows(data.results);
+      if (rows) {
+        const list = el(doc, "div", "mem-rows");
+        card.appendChild(list);
+        const items = rows.map((row) => {
+          const line = el(doc, "div", "mem-row");
+          const title = el(doc, "span", "mem-row-title");
+          line.appendChild(title);
+          const meta = [row.type, row.id === null || row.id === undefined ? null : `#${row.id}`].filter(Boolean).join(" · ");
+          if (meta) line.appendChild(el(doc, "span", "mem-row-chip", meta));
+          list.appendChild(line);
+          return { title, text: row.title };
+        });
+        tasks.push((instant, next) => playMemoryRows(state, items, instant, next));
+      } else {
+        const raw = textOf(data.results);
+        if (raw) {
+          const pre = el(doc, "pre", "mem-pre");
+          card.appendChild(pre);
+          tasks.push((instant, next) => typeText(state, pre, raw, instant, next));
+        }
+      }
+    }
+    return { el: box, play: (instant, next) => runTasks(state, tasks, instant, next) };
+  }
+
+  function playMemoryRows(state, rows, instant, next) {
+    const finish = () => {
+      for (const row of rows) row.title.textContent = row.text;
+      next();
+    };
+    if (instant) {
+      finish();
+      return;
+    }
+    const total = rows.reduce((sum, row) => sum + row.text.length, 0);
+    const plan = typingPlan(total, { maxMs: 1500 });
+    let rowIndex = 0;
+    let charIndex = 0;
+    const frame = () => {
+      if (state.skipCurrent) {
+        finish();
+        return;
+      }
+      let budget = plan.charsPerFrame;
+      while (budget > 0 && rowIndex < rows.length) {
+        const row = rows[rowIndex];
+        if (charIndex < row.text.length) {
+          const advance = Math.min(budget, row.text.length - charIndex);
+          charIndex += advance;
+          budget -= advance;
+          row.title.textContent = row.text.slice(0, charIndex);
+        }
+        if (charIndex >= row.text.length) {
+          rowIndex += 1;
+          charIndex = 0;
+          budget -= 1;
+        }
+      }
+      if (rowIndex >= rows.length) {
+        finish();
+        return;
+      }
+      followBottom(state);
+      state.rafId = win.requestAnimationFrame(frame);
+    };
+    state.rafId = win.requestAnimationFrame(frame);
+  }
+
+  // Pretty-prints a JSON value with the keys in the accent token, using text
+  // nodes and spans only.
+  function renderJsonInto(node, value) {
+    const text = textOf(value);
+    const fragment = doc.createDocumentFragment();
+    text.split("\n").forEach((line, index) => {
+      if (index > 0) fragment.appendChild(doc.createTextNode("\n"));
+      const match = /^(\s*)("(?:[^"\\]|\\.)*")(\s*:)/.exec(line);
+      if (!match) {
+        fragment.appendChild(doc.createTextNode(line));
+        return;
+      }
+      fragment.appendChild(doc.createTextNode(match[1]));
+      fragment.appendChild(el(doc, "span", "tool-key", match[2]));
+      fragment.appendChild(doc.createTextNode(line.slice(match[0].length)));
+    });
+    node.replaceChildren(fragment);
+  }
+
+  // Tool card: server chip plus short name, the params as indented JSON with
+  // the keys in the accent token and the result typed (string) or rendered as
+  // JSON (object), both capped at MAX_TOOL_LINES visible lines.
+  function buildToolViewer(state, step) {
+    const data = step?.data ?? {};
+    const { server, name } = splitToolName(data.name ?? step?.tool ?? "");
+    const box = el(doc, "div", "live-tool");
+    const head = el(doc, "div", "tool-head");
+    if (server) head.appendChild(el(doc, "span", "tool-server", server));
+    head.appendChild(el(doc, "span", "tool-name", name || "herramienta"));
+    box.appendChild(head);
+    if (step?.truncated) box.appendChild(el(doc, "div", "live-notice", "contenido recortado"));
+
+    const tasks = [];
+    const hasParams = data.params !== null && data.params !== undefined && data.params !== "";
+    if (hasParams) {
+      box.appendChild(el(doc, "div", "live-label", "parámetros"));
+      const pre = el(doc, "pre", "live-pre live-code tool-json");
+      box.appendChild(pre);
+      tasks.push((instant, next) =>
+        typeText(state, pre, textOf(data.params), instant, next, (node) => renderJsonInto(node, data.params))
+      );
+    }
+    const result = data.result;
+    const running = String(step?.status ?? "done") === "running";
+    if (result === null || result === undefined || result === "") {
+      if (running) box.appendChild(el(doc, "div", "live-typing", "escribiendo…"));
+    } else {
+      const capped = capTerminalLines(textOf(result), MAX_TOOL_LINES);
+      if (capped.hidden > 0) box.appendChild(el(doc, "div", "term-note", `… ${capped.hidden} líneas anteriores`));
+      box.appendChild(el(doc, "div", "live-label", "resultado"));
+      const pre = el(doc, "pre", typeof result === "string" ? "live-pre live-text" : "live-pre live-code tool-json");
+      box.appendChild(pre);
+      tasks.push((instant, next) =>
+        typeText(state, pre, capped.text, instant, next, typeof result === "string" ? null : (node) => renderJsonInto(node, result))
+      );
+    }
+    return { el: box, play: (instant, next) => runTasks(state, tasks, instant, next) };
   }
 
   // -- attach ---------------------------------------------------------------
