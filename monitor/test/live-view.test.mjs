@@ -11,6 +11,8 @@ import {
   highlightPath,
   init,
   languageForPath,
+  pollSince,
+  stepSignature,
   stepBlocks,
   stepTabKey,
   stepTabLabel,
@@ -207,4 +209,26 @@ test("stepBlocks describe each step type for the replay", () => {
 
 test("init without a DOM returns null so node can import the module", () => {
   assert.equal(init({ window: null, document: null }), null);
+});
+
+test("a running step keeps being asked for until it finishes", () => {
+  const steps = new Map([
+    ["a", step("a", "read", "x.ts")],
+    ["b", step("b", "write", "y.ts", {}, { status: "running" })],
+    ["c", step("c", "command", null, { command: "ls" })]
+  ]);
+  assert.equal(pollSince(["a", "b", "c"], steps), "a");
+  steps.set("b", step("b", "write", "y.ts", { content: "done" }));
+  assert.equal(pollSince(["a", "b", "c"], steps), "c");
+  steps.set("a", step("a", "read", "x.ts", {}, { status: "running" }));
+  assert.equal(pollSince(["a", "b", "c"], steps), null);
+  assert.equal(pollSince([], new Map()), null);
+});
+
+test("a re-delivered step is replayed only when it changed", () => {
+  const running = step("w", "write", "y.ts", {}, { status: "running" });
+  const finished = step("w", "write", "y.ts", { content: "hello" });
+  assert.equal(stepSignature(running), stepSignature({ ...running }));
+  assert.notEqual(stepSignature(running), stepSignature(finished));
+  assert.equal(stepSignature(null), "");
 });

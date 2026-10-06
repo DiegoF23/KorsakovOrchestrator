@@ -17,6 +17,30 @@ export const FRAME_MS = 1000 / 60;
 export const MAX_BLOCKS_PER_TAB = 40;
 // Distance from the bottom, in pixels, still counted as "at the end".
 const STICK_THRESHOLD_PX = 24;
+// Step ids remembered per worker to build the next `since`.
+export const MAX_KNOWN_STEPS = 400;
+
+// The `since` sent to /api/steps: the id just before the first step that is
+// still running, so a running step keeps coming back until it finishes (its
+// content usually arrives only then). With nothing running it is the last id.
+export function pollSince(order, steps) {
+  const ids = order ?? [];
+  const firstRunning = ids.findIndex((id) => steps.get(id)?.status === "running");
+  if (firstRunning === -1) return ids.length ? ids[ids.length - 1] : null;
+  return firstRunning > 0 ? ids[firstRunning - 1] : null;
+}
+
+// A cheap fingerprint: a re-delivered step is replayed only when it changed.
+export function stepSignature(step) {
+  if (!step) return "";
+  let size = 0;
+  try {
+    size = JSON.stringify(step.data ?? null).length;
+  } catch {
+    size = -1;
+  }
+  return `${step.status ?? ""}|${step.truncated ? 1 : 0}|${size}`;
+}
 const STORAGE_PREFIX = "fleet-monitor.live.";
 
 // ---------------------------------------------------------------------------
@@ -410,6 +434,7 @@ export function init(options = {}) {
       tabEls: new Map(),
       queue: [],
       steps: new Map(),
+      order: [],
       animating: false,
       skipCurrent: false,
       inFlight: false,
@@ -534,7 +559,8 @@ export function init(options = {}) {
     const params = new URLSearchParams();
     params.set("project", state.projectId ?? "");
     params.set("worker", state.worker.name ?? "");
-    if (state.lastId) params.set("since", state.lastId);
+    const since = pollSince(state.order, state.steps);
+    if (since) params.set("since", since);
     try {
       const response = await fetchFn(`/api/steps?${params.toString()}`);
       if (!response.ok) return;
@@ -543,6 +569,17 @@ export function init(options = {}) {
       if (!steps.length && body.notice) showNotice(state, body.notice);
       for (const step of steps) {
         if (!step || !step.id) continue;
+        const known = state.steps.get(step.id);
+        // Running steps are asked for again on every poll; replay them only
+        // when they changed (for example when they finished with content).
+        if (known && stepSignature(known) === stepSignature(step)) continue;
+        if (!known) {
+          state.order.push(step.id);
+          if (state.order.length > MAX_KNOWN_STEPS) {
+            const dropped = state.order.splice(0, state.order.length - MAX_KNOWN_STEPS);
+            for (const id of dropped) state.steps.delete(id);
+          }
+        }
         state.lastId = step.id;
         enqueue(state, step);
       }
