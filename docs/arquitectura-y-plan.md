@@ -34,6 +34,8 @@ Servidor local Node (sin dependencias pesadas)
 | 3 | Selector de orquestador: OpenCode (el más fácil), luego Codex y Antigravity | protocolos oficiales de cada CLI |
 | 4 | Comando de inicio de proyecto: estructura para desarrollo con IA (reglas, skills, agentes, docs, datos, MCP) | gentle-ai `--scope workspace` + `AGENTS.md` como fuente única |
 
+**Referencia de diseño para la etapa 2 (idea del usuario, 2026-10-06, solo a tener en cuenta):** así trabaja hoy el usuario y así debería sentirse Korsakov. Monitor ocupando unos dos tercios de la pantalla a la izquierda (agentes con su visor en vivo arriba, árbol de git abajo) y el chat del orquestador en una columna a la derecha. Del chat de Claude Desktop le sirven: el cuadro de escritura abajo, el proyecto activo, el contador de cambios (`+82 -0`) con el botón "Crear PR", y los selectores de permisos, modelo y esfuerzo.
+
 **Esfuerzo estimado (investigaciones):** primera versión de 2 a 5 semanas (15–25 días según LongCat; 2–4 semanas para Claude más 1–2 por cada adaptador según DeepSeek).
 
 **Quién trabaja:** DeepSeek 4.1 Flash construye, Gemini 3.8 Flash mapea código, LongCat investiga, Claude diseña y revisa.
