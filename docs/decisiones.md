@@ -46,6 +46,12 @@ Todas tomadas el 2026-10-05 salvo indicación. Formato: decisión → por qué �
 - Por ahora es web. Más adelante quizás se empaquete como app de escritorio con un envoltorio web → escritorio.
 - **Consecuencia de diseño:** mantener servidor Node + página web sin acoplarse al navegador, para que el envoltorio sea trivial. Electron puede correr el servidor Node adentro; Tauri necesitaría el servidor como proceso aparte (sidecar). Sin decidir.
 
+## D10. Un solo monitor: el web global
+
+- El monitor de terminal de FlotaGrupo (`tools/autopilot/open-monitors.ps1`, Windows Terminal) queda retirado (2026-10-06, pedido del usuario). Solo vuelve con `"terminalMonitor": true` en `kit.config.json`.
+- En FlotaGrupo `main`: commit `5fc50e72` + merge `1e740469` (`open-monitors.ps1` sale salvo `terminalMonitor`; `dispatch.ps1`, `heartbeat.ps1` y `start-flota.ps1` ya no lo abren; README, ORCHESTRATION y el ejemplo de configuración apuntan al monitor web).
+- **Por qué:** se abría solo cada vez que se repartía una tarea. El monitor web de Korsakov (`:4202`) lo reemplaza.
+
 ## D8. Respuestas cortas
 
 - El usuario pide respuestas resumidas siempre; si quiere detalle, lo pide.
