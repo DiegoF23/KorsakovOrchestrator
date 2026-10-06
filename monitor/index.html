@@ -101,6 +101,22 @@
   .link { font-size: 11px; }
   .link-up { color: var(--live); text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
   .link-down { color: var(--warn); }
+  /* Project picker: same palette as the rest of the header, compact enough to
+     share the top line with the title and the meters. */
+  .project-picker { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+  .project-picker select {
+    min-width: 0;
+    max-width: 220px;
+    background: var(--panel);
+    color: var(--live);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+  .project-picker select:hover { border-color: var(--live); }
   .orch { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
   .orch-engine { color: var(--live); font-size: 13px; text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
   .orch-model { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
@@ -404,6 +420,10 @@
   <header class="topbar">
     <div class="topbar-line">
       <h1>Monitor</h1>
+      <label class="project-picker" for="project-select">
+        <span class="pc-label">PROYECTO</span>
+        <select id="project-select" aria-label="Proyecto monitoreado"></select>
+      </label>
       <span class="link link-up" id="link" role="status">en línea</span>
       <span class="stamp" id="stamp">esperando la primera lectura…</span>
       <span class="orch" id="orch" title="">
@@ -456,11 +476,16 @@
   var SVG_NS = "http://www.w3.org/2000/svg";
   var FALLBACK_LANE_COLOR = "#00a333";
   var HIDDEN_STORAGE_KEY = "fleet-monitor.showHidden";
+  var PROJECT_STORAGE_KEY = "fleet-monitor.project";
   var snapshot = null;
   var knownShas = new Set();
   var firstRender = true;
   var gitMode = "panel";
   var showHidden = false;
+  var projectId = null;
+  var projectList = [];
+  var defaultProjectId = null;
+  var pollTimer = null;
   // The choice of showing the hidden finished cards survives the refresh; the
   // page still works when storage is unavailable (private mode, blocked).
   try {
@@ -477,6 +502,80 @@
   }
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
+  }
+  // Project selector: the chosen id travels as ?project= on every poll, stays
+  // in the page URL and is remembered in localStorage. Every storage/history
+  // access is wrapped: the page keeps working when they are unavailable.
+  function urlProject() {
+    try {
+      return new URL(window.location.href).searchParams.get("project");
+    } catch (error) {
+      return null;
+    }
+  }
+  function storedProject() {
+    try {
+      return window.localStorage.getItem(PROJECT_STORAGE_KEY);
+    } catch (error) {
+      return null;
+    }
+  }
+  function rememberProject(id) {
+    try {
+      window.localStorage.setItem(PROJECT_STORAGE_KEY, id);
+    } catch (error) {
+      // Without storage the choice lives only in this page.
+    }
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.set("project", id);
+      window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+    } catch (error) {
+      // Without history the URL keeps whatever it had.
+    }
+  }
+  function applyProject(id) {
+    var next = id || null;
+    var changed = next !== projectId;
+    projectId = next;
+    var select = document.getElementById("project-select");
+    if (select && projectId) select.value = projectId;
+    if (changed && projectId) rememberProject(projectId);
+  }
+  function renderProjectSelect() {
+    var select = document.getElementById("project-select");
+    clear(select);
+    projectList.forEach(function (project) {
+      var option = document.createElement("option");
+      option.value = project.id;
+      option.textContent = project.name || project.id;
+      select.appendChild(option);
+    });
+    if (projectId) select.value = projectId;
+  }
+  // On load the URL wins over localStorage; if the remembered id no longer
+  // exists (or there is no list at all) the server's default is used.
+  function loadProjects() {
+    fetch("/api/projects", { cache: "no-store" })
+      .then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        return response.json();
+      })
+      .then(function (data) {
+        projectList = (data && data.projects) || [];
+        defaultProjectId = (data && data.defaultId) || (projectList[0] && projectList[0].id) || null;
+        var remembered = urlProject() || storedProject();
+        var known = projectList.some(function (project) {
+          return project.id === remembered;
+        });
+        applyProject(known ? remembered : defaultProjectId);
+        renderProjectSelect();
+        poll();
+      })
+      .catch(function () {
+        // Without the list the page still polls the server's first project.
+        poll();
+      });
   }
   function fmtClock(iso) {
     var date = new Date(iso);
@@ -836,6 +935,11 @@
 
   function render(next) {
     snapshot = next;
+    // The server names the project it answered for; keep the picker in sync
+    // (first poll, or a fallback after an unknown id).
+    if (next.project && next.project.id && next.project.id !== projectId) {
+      applyProject(next.project.id);
+    }
     var commits = (next.git && next.git.commits) || [];
     commits.forEach(function (commit) {
       commit.__isNew = !firstRender && !knownShas.has(commit.sha);
@@ -865,12 +969,23 @@
 
   function schedule() {
     var seconds = (snapshot && Number(snapshot.pollSeconds)) || POLL_FALLBACK;
-    window.setTimeout(poll, Math.max(2, seconds) * 1000);
+    pollTimer = window.setTimeout(poll, Math.max(2, seconds) * 1000);
   }
 
   function poll() {
-    fetch("/api/state", { cache: "no-store" })
+    if (pollTimer) {
+      window.clearTimeout(pollTimer);
+      pollTimer = null;
+    }
+    var query = projectId ? "?project=" + encodeURIComponent(projectId) : "";
+    fetch("/api/state" + query, { cache: "no-store" })
       .then(function (response) {
+        if (response.status === 404 && projectId) {
+          // The config no longer lists the chosen project: fall back to the
+          // default and let the next poll pick it up.
+          applyProject(defaultProjectId);
+          throw new Error("proyecto desconocido");
+        }
         if (!response.ok) throw new Error("HTTP " + response.status);
         return response.json();
       })
@@ -941,6 +1056,11 @@
     renderGit(snapshot.git);
   });
 
+  document.getElementById("project-select").addEventListener("change", function (event) {
+    applyProject(event.target.value);
+    poll();
+  });
+
   document.getElementById("hidden-toggle").addEventListener("click", function () {
     showHidden = !showHidden;
     try {
@@ -960,7 +1080,7 @@
   });
 
   startRain();
-  poll();
+  loadProjects();
 })();
 </script>
 </body>

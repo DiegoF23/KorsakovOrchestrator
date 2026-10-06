@@ -172,6 +172,7 @@ y `~`. Claves:
 | `opencode.accountFile` | `opencode-account.json` (opcional, cambio de cuenta). |
 | `opencode.estimateScript` | `opencode-usage.mjs` del kit (respaldo y delta local). |
 | `repo` | Repositorio para el árbol de git y el último commit; si falta, se usa el del kit. |
+| `projects` | Lista opcional de proyectos vigilados (`id`, `name`, `repo`, `kitConfig`); sin ella queda el proyecto implícito de `repo` + `workers.kitConfig`. |
 | `translate.enabled` | `false` apaga las traducciones y los resúmenes (por defecto, encendidos). |
 | `translate.model` | Modelo del helper (`opencode-go/space-bunny-free` por defecto). |
 | `translate.summarySeconds` | Mínimo entre resúmenes por pista (120 s por defecto). |
@@ -190,6 +191,35 @@ usa solo las tarjetas visibles y pasa al total cuando las ocultas se muestran.
 Las pistas trabajando, esperando o sin reporte reciente nunca se ocultan, y una
 tarjeta sin archivo de estado o sin hora válida tampoco. Con `0` o sin la clave,
 el tablero se muestra completo, como hasta ahora.
+
+## Varios proyectos
+
+La configuración acepta una lista opcional `projects` para vigilar varios
+proyectos y cambiar entre ellos desde el encabezado:
+
+```json
+"projects": [
+  { "id": "korsakov", "name": "Korsakov Orchestrator", "repo": "../..", "kitConfig": "../autopilot/kit.config.json" }
+]
+```
+
+Cada entrada lleva `id`, `name`, `repo` y `kitConfig`; las rutas se resuelven
+igual que `repo` y `workers.kitConfig` (contra la carpeta del archivo, con
+`%VARIABLES%` y `~`), y `name` cae al nombre de la carpeta del repo. Sin
+`projects`, todo sigue como antes: un único proyecto implícito (`id`
+`default`, nombre = carpeta del repo) armado con el `repo` y el
+`workers.kitConfig` de arriba.
+
+En el encabezado hay un selector con los proyectos. La elección viaja como
+`?project=<id>` en cada consulta, queda en la URL de la página y se recuerda en
+`localStorage`; al cargar gana la URL, después `localStorage`, y si el id ya no
+existe se usa el primero. La API suma `GET /api/projects`
+(`{ "projects": [{ "id", "name" }], "defaultId": "<primero>" }`) y
+`GET /api/state?project=<id>` (sin el parámetro, el primero; id desconocido →
+404 con `{ "error": "unknown project" }`). La foto incluye
+`project: { id, name }`. El consumo, el estado del PC y los datos del
+orquestador son globales y se comparten entre proyectos; el árbol de git, las
+pistas, el kit y sus cachés son de cada proyecto.
 
 Agregar un motor nuevo es agregar un adaptador en `adapters/` con `usage()` y
 `activity()`, sin tocar la página.
