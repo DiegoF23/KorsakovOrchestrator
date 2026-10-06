@@ -86,12 +86,15 @@ export function mapOpenCodeSteps(messages, ctx = {}) {
   let index = 0;
   for (const message of messages ?? []) {
     const info = message?.info ?? {};
-    const time = toIso(info.time?.completed ?? info.time?.created);
+    const messageMs = Number(info.time?.completed ?? info.time?.created);
+    const time = toIso(messageMs);
     for (const part of message?.parts ?? []) {
       index += 1;
       if (!part || typeof part !== "object") continue;
       if (part.type === "tool") {
         steps.push(openCodeToolStep(part, time, index, ctx));
+      } else if (part.type === "reasoning") {
+        steps.push(openCodeThinkingStep(part, messageMs, index));
       } else if (part.type === "text" && info.role === "assistant" && part.text) {
         steps.push(
           capStep({
@@ -108,6 +111,23 @@ export function mapOpenCodeSteps(messages, ctx = {}) {
     }
   }
   return lastSteps(steps);
+}
+
+// A reasoning part: running while `time.end` is missing (the server sends the
+// text only when the model stops thinking) and done afterwards. `startedAt` is
+// kept in epoch ms so the viewer can run a live counter while it reasons.
+function openCodeThinkingStep(part, messageMs, index) {
+  const startedAt = msOrNull(part.time?.start);
+  const endedAt = msOrNull(part.time?.end);
+  return capStep({
+    id: part.id ?? `reasoning-${index}`,
+    time: toIso(startedAt ?? messageMs),
+    type: "thinking",
+    tool: "reasoning",
+    status: endedAt ? "done" : "running",
+    title: "pensando",
+    data: { text: part.text ?? "", startedAt, endedAt }
+  });
 }
 
 function openCodeToolStep(part, time, index, ctx) {
@@ -364,6 +384,11 @@ function normalizeDir(value) {
 function toIso(ms) {
   const value = Number(ms);
   return Number.isFinite(value) && value > 0 ? new Date(value).toISOString() : new Date().toISOString();
+}
+
+function msOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function round4(value) {

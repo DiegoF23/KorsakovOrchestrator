@@ -7,11 +7,13 @@ import {
   MAX_TERMINAL_LINES,
   MAX_TOOL_LINES,
   MIN_CHARS_PER_FRAME,
+  THINKING_MAX_CHARS,
   TYPING_MAX_MS,
   ansi256To16,
   ansiLines,
   capTerminalLines,
   catchUpCount,
+  formatElapsed,
   highlight,
   highlightPath,
   init,
@@ -20,6 +22,7 @@ import {
   memoryResultRows,
   parseAnsi,
   pollSince,
+  splitThinkingText,
   splitToolName,
   stepSignature,
   stepBlocks,
@@ -109,6 +112,19 @@ test("upsertTab never drops the pinned tab", () => {
   assert.equal(tabs.some((tab) => tab.key === stepTabKey(step("s1", "write", "C:\\repo\\p1.ts", { content: "x" }))), false);
 });
 
+test("every thinking step shares one pensando tab", () => {
+  const running = step("t1", "thinking", null, { text: "", startedAt: 1, endedAt: null }, { status: "running" });
+  const done = step("t2", "thinking", null, { text: "listo", startedAt: 1, endedAt: 2 }, { status: "done" });
+  assert.equal(stepTabKey(running), "thinking");
+  assert.equal(stepTabKey(done), "thinking");
+  assert.equal(stepTabLabel(running), "pensando");
+  assert.equal(stepTabLabel(done), "pensando");
+
+  let tabs = upsertTab([], running, "thinking");
+  tabs = upsertTab(tabs, done, "thinking");
+  assert.equal(tabs.length, 1, "the running step and its finished version share the tab");
+});
+
 test("typing plan caps a step at about 3 s and keeps at least 2 chars per frame", () => {
   const small = typingPlan(10);
   assert.ok(small.charsPerFrame >= MIN_CHARS_PER_FRAME);
@@ -126,6 +142,29 @@ test("catch-up finishes the older steps only when more than 5 are waiting", () =
   assert.equal(catchUpCount(5), 0);
   assert.equal(catchUpCount(6), 1);
   assert.equal(catchUpCount(12), 7);
+});
+
+test("the elapsed formatter keeps minutes uncapped", () => {
+  assert.equal(formatElapsed(5000), "0:05");
+  assert.equal(formatElapsed(155000), "2:35");
+  assert.equal(formatElapsed(3660000), "61:00");
+  assert.equal(formatElapsed(0), "0:00");
+  assert.equal(formatElapsed(null), "0:00");
+  assert.equal(formatElapsed(-1000), "0:00", "a clock skew never shows a negative time");
+});
+
+test("long reasoning splits at the 4000-character typing cap", () => {
+  assert.equal(THINKING_MAX_CHARS, 4000);
+  const long = "x".repeat(4500);
+  const split = splitThinkingText(long);
+  assert.equal(split.visible.length, THINKING_MAX_CHARS);
+  assert.equal(split.hidden.length, 500);
+  assert.equal(split.visible + split.hidden, long);
+
+  assert.deepEqual(splitThinkingText("hola"), { visible: "hola", hidden: "" });
+  assert.deepEqual(splitThinkingText(""), { visible: "", hidden: "" });
+  assert.deepEqual(splitThinkingText(null), { visible: "", hidden: "" });
+  assert.equal(splitThinkingText("abcdef", 3).hidden, "def");
 });
 
 test("the highlighter marks comments, strings, numbers, keywords and functions per family", () => {
@@ -332,6 +371,7 @@ test("the viewer registry maps each step type to its dedicated viewer", () => {
   assert.equal(viewerFor({ type: "edit" }), "blocks");
   assert.equal(viewerFor({ type: "read" }), "blocks");
   assert.equal(viewerFor({ type: "message" }), "blocks");
+  assert.equal(viewerFor({ type: "thinking" }), "thinking");
   assert.equal(viewerFor({ type: "unknown" }), "blocks");
   assert.equal(viewerFor(null), "blocks");
 });

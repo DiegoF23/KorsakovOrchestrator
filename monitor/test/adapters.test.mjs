@@ -452,6 +452,38 @@ test("opencode message parts map to full typed steps", () => {
   assert.equal(steps[11].data.result, null);
 });
 
+test("opencode reasoning parts map to running and done thinking steps", () => {
+  const messages = [
+    {
+      info: { id: "s1", role: "assistant", time: { created: 1759485600000 } },
+      parts: [
+        { id: "r1", type: "reasoning", text: "", time: { start: 1759485605000 } },
+        {
+          id: "r2",
+          type: "reasoning",
+          text: "Dos más dos son cuatro.",
+          time: { start: 1759485605000, end: 1759485720000 }
+        }
+      ]
+    }
+  ];
+  const steps = mapOpenCodeSteps(messages, CTX);
+
+  assert.deepEqual(steps.map((step) => `${step.type}/${step.status}`), ["thinking/running", "thinking/done"]);
+  assert.deepEqual(steps.map((step) => step.id), ["r1", "r2"], "the part id keeps the thinking step stable for polling");
+  assert.equal(steps[0].tool, "reasoning");
+  assert.equal(steps[0].title, "pensando");
+  assert.equal(steps[0].time, new Date(1759485605000).toISOString(), "the step time is the reasoning start");
+  assert.equal(steps[0].data.text, "", "the text is still empty while it reasons");
+  assert.equal(steps[0].data.startedAt, 1759485605000, "start ms feeds the live counter");
+  assert.equal(steps[0].data.endedAt, null);
+  assert.equal(steps[1].data.text, "Dos más dos son cuatro.");
+  assert.equal(steps[1].data.startedAt, 1759485605000);
+  assert.equal(steps[1].data.endedAt, 1759485720000);
+
+  assert.deepEqual(mapOpenCodeMessages(messages, CTX), [], "reasoning never leaks into the short activity events");
+});
+
 test("claude transcript entries map to full typed steps joined by tool_use_id", () => {
   const entries = parseJsonlTail(read("claude-steps.jsonl"));
   const steps = mapClaudeSteps(entries, CTX);
@@ -521,6 +553,36 @@ test("claude transcript entries map to full typed steps joined by tool_use_id", 
   assert.equal(steps[10].title, "Task: explore the repo");
   assert.equal(steps[11].type, "tool");
   assert.equal(steps[11].data.result, null);
+});
+
+test("claude thinking blocks map to done steps and empty or redacted ones are skipped", () => {
+  const entries = [
+    {
+      type: "assistant",
+      uuid: "u1",
+      timestamp: "2026-10-04T10:00:00Z",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "Dos más dos son cuatro." },
+          { type: "thinking", thinking: "" },
+          { type: "thinking", thinking: "   " },
+          { type: "redacted_thinking", data: "opaco" },
+          { type: "text", text: "Listo." }
+        ]
+      }
+    }
+  ];
+  const steps = mapClaudeSteps(entries, CTX);
+
+  assert.deepEqual(steps.map((step) => `${step.type}/${step.status}`), ["thinking/done", "message/done"]);
+  assert.equal(steps[0].id, "think-u1-1", "the entry uuid and index keep the id stable");
+  assert.equal(steps[0].time, "2026-10-04T10:00:00.000Z");
+  assert.equal(steps[0].tool, "thinking");
+  assert.equal(steps[0].title, "pensando");
+  assert.equal(steps[0].data.text, "Dos más dos son cuatro.");
+  assert.equal(steps[0].data.startedAt, null, "a transcript thinking block carries no timing");
+  assert.equal(steps[0].data.endedAt, null);
 });
 
 test("both step mappers cap text, drop binary data and keep the last 300 steps", () => {
