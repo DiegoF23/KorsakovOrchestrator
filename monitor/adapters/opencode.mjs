@@ -329,7 +329,26 @@ export async function steps(worker, ctx = {}) {
   }
 }
 
-// Picks the newest session of the worker directory and returns its messages;
+// Several builders can share one folder (two research tracks in the same
+// worktree), so the folder alone does not identify a worker's session. The
+// launchers title each session with the track name ("flota <track> attempt N"
+// from supervise.ps1, "<track>" from oc-run.ps1): prefer the newest session
+// whose title has the track name as a whole word, and fall back to the newest
+// session of the folder only when no title matches.
+export function pickSession(sessions, trackName) {
+  const list = Array.isArray(sessions) ? sessions.filter((session) => session?.id) : [];
+  const newest = (items) => [...items].sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0] ?? null;
+  const name = String(trackName ?? "").trim().toLowerCase();
+  if (name) {
+    const titled = list.filter((session) =>
+      String(session?.title ?? "").toLowerCase().split(/\s+/).includes(name)
+    );
+    if (titled.length) return newest(titled);
+  }
+  return newest(list);
+}
+
+// Picks the worker's session in its directory and returns its messages;
 // `notice` explains why there is nothing to read, mirroring the activity card.
 async function fetchSessionMessages(worker, ctx) {
   const host = ctx.kit?.server?.host ?? "127.0.0.1";
@@ -347,7 +366,7 @@ async function fetchSessionMessages(worker, ctx) {
       ? sessions.filter((session) => normalizeDir(session?.directory) === wanted)
       : sessions
     : [];
-  const picked = inDir.sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0];
+  const picked = pickSession(inDir, worker?.name);
   if (!picked?.id) return { messages: null, notice: "sin sesión activa" };
   const messages = await fetchJson(`${base}/session/${encodeURIComponent(picked.id)}/message`, 8000);
   return { messages, notice: null };

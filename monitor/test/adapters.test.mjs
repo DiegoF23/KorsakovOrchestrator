@@ -966,3 +966,17 @@ test("command output keeps ANSI color escapes but binary content is replaced", a
   assert.equal(binary.data.content, "[datos binarios omitidos]");
   assert.equal(binary.truncated, true);
 });
+
+test("two builders sharing a folder each get their own OpenCode session by title", async () => {
+  const { pickSession } = await import("../adapters/opencode.mjs");
+  const sessions = [
+    { id: "a", title: "flota research-import attempt 1", time: { updated: 10 } },
+    { id: "b", title: "flota research-ubicar attempt 1", time: { updated: 20 } },
+    { id: "c", title: "flota research-import attempt 2", time: { updated: 15 } },
+    { id: "d", title: "flota research-import-extra attempt 1", time: { updated: 30 } }
+  ];
+  assert.equal(pickSession(sessions, "research-import").id, "c");
+  assert.equal(pickSession(sessions, "research-ubicar").id, "b");
+  assert.equal(pickSession(sessions, "unknown").id, "d", "no title match falls back to the newest");
+  assert.equal(pickSession([], "x"), null);
+});
