@@ -10,6 +10,8 @@
 
 ## Trabajo pendiente
 
+- [ ] **Tiempo restante real en las tarjetas** (pedido del usuario, 2026-10-06; resolver más adelante). Hoy el "~5:17" sale de ``etaEnd``, una hora de fin que el orquestador adivina al lanzar la pista (`resolveRemainingText` en `monitor/lib/format.mjs`), y queda desfasado. Objetivo: que se actualice solo, por programación, sin gastar cuota del orquestador. Ideas a evaluar: (a) el constructor escribe líneas `PROGRESS n/m` (o marca casillas del brief) y el monitor estima `restante = transcurrido × (m − n) / n`; (b) el supervisor cuenta tareas cerradas en el documento de la pista; (c) un histórico de duraciones por tipo de tarea y modelo. El orquestador no interviene.
+
 - [ ] Etapa 1: llevar el monitor a `Korsakov Orchestrator` como app independiente con selector de proyecto.
 - [ ] Integrar en `main` las ramas del monitor (`feat/fleet-monitor-antigravity`, `bench/bench-deepseek`). **Decisión del usuario.**
 - [ ] Pasar `agy-run.ps1` / `oc-run.ps1` a `tools/autopilot` como despachadores oficiales (aprobado).
