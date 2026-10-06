@@ -40,6 +40,12 @@ Todas tomadas el 2026-10-05 salvo indicación. Formato: decisión → por qué �
 
 - Ocultar tarjetas terminadas o falladas a los **5 minutos** (elección del usuario). El texto "N terminadas ocultas" es un botón que las vuelve a mostrar.
 
+## D9. Solo localhost; escritorio quizás más adelante
+
+- Korsakov corre solo en la PC del usuario (`127.0.0.1`); nunca se expone a la red.
+- Por ahora es web. Más adelante quizás se empaquete como app de escritorio con un envoltorio web → escritorio.
+- **Consecuencia de diseño:** mantener servidor Node + página web sin acoplarse al navegador, para que el envoltorio sea trivial. Electron puede correr el servidor Node adentro; Tauri necesitaría el servidor como proceso aparte (sidecar). Sin decidir.
+
 ## D8. Respuestas cortas
 
 - El usuario pide respuestas resumidas siempre; si quiere detalle, lo pide.
