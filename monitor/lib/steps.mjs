@@ -11,8 +11,9 @@ export const MAX_STEPS = 300;
 const MAX_DEPTH = 6;
 const MAX_ITEMS = 100;
 const BINARY_PLACEHOLDER = "[datos binarios omitidos]";
-// C0 controls except tab, newline and carriage return.
-const CONTROL_CHARS = /[\u0000-\u0008\u000E-\u001F]/;
+// C0 controls except tab, newline, carriage return and ESC: ESC starts the
+// ANSI color sequences that the mini terminal must keep.
+const CONTROL_CHARS = /[\u0000-\u0008\u000E-\u001A\u001C-\u001F]/;
 
 function capValue(value, depth, state) {
   if (typeof value === "string") {

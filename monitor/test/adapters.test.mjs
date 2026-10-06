@@ -573,3 +573,14 @@ test("both step mappers cap text, drop binary data and keep the last 300 steps",
   assert.equal(claudeMany.length, 300);
   assert.equal(claudeMany[0].data.text, "linea 10");
 });
+
+test("command output keeps ANSI color escapes but binary content is replaced", async () => {
+  const { commandStep, capStep } = await import("../lib/steps.mjs");
+  const colored = "\u001b[32mok\u001b[0m 3 passed";
+  const step = commandStep({ id: "c1", time: null, tool: "bash", status: "done", command: "npm test", output: colored, exitCode: 0 });
+  assert.equal(step.data.output, colored);
+  assert.equal(step.truncated, undefined);
+  const binary = capStep({ id: "b1", data: { content: "PNG\u0000\u0001\u0002" } });
+  assert.equal(binary.data.content, "[datos binarios omitidos]");
+  assert.equal(binary.truncated, true);
+});
