@@ -313,6 +313,271 @@ function firstLine(value) {
   return String(value ?? "").split(/\r?\n/)[0];
 }
 
+// -- Brain transcripts -------------------------------------------------------
+// Runs launched directly through the agy CLI leave no stream-json: the monitor
+// discovers them from ~/.gemini/antigravity-cli/brain/<id>/.system_generated/
+// logs/transcript.jsonl (see recentAgyConversations in lib/state.mjs) and the
+// card passes activityFormat "brain" here. One line per step carrying
+// step_index, created_at, error?, thinking?, content? and tool_calls, where
+// every argument value is JSON-encoded ("\"C:\\\\dir\\\\file\"", "100").
+const BRAIN_READ_TOOLS = new Set(["view_file", "list_dir", "grep_search", "read_file", "read_browser_page", "read_resource", "read_url_content"]);
+const ARG_DECODE_MAX_DEPTH = 4;
+
+function isBrainReadLike(name) {
+  return BRAIN_READ_TOOLS.has(name) || isReadLike(name);
+}
+
+function decodeArgValue(value, depth = 0) {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (depth < ARG_DECODE_MAX_DEPTH && text.length > 1 && /^["[{]/.test(text)) {
+      try {
+        return decodeArgValue(JSON.parse(text), depth + 1);
+      } catch {
+        return value;
+      }
+    }
+    return value;
+  }
+  if (Array.isArray(value)) return value.map((item) => decodeArgValue(item, depth + 1));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const [key, item] of Object.entries(value)) out[key] = decodeArgValue(item, depth + 1);
+    return out;
+  }
+  return value;
+}
+
+function brainToolCalls(entry) {
+  return Array.isArray(entry?.tool_calls)
+    ? entry.tool_calls.filter((call) => call && typeof call === "object")
+    : [];
+}
+
+function brainToolArgs(call) {
+  return decodeArgValue(call?.args && typeof call.args === "object" ? call.args : {});
+}
+
+function isoTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+// A tool call's outcome, read from the GENERIC result line that follows it.
+function brainOutcome(result) {
+  if (!result) return { status: "running", output: null, exitCode: null };
+  const exitCode = numberOrNull(result.exit_code ?? result.exitCode);
+  if (result.error) return { status: "error", output: String(result.error), exitCode };
+  const status = String(result.status ?? "").toUpperCase();
+  return {
+    status: status === "ERROR" ? "error" : "done",
+    output: typeof result.content === "string" ? result.content : null,
+    exitCode
+  };
+}
+
+function brainEventForCall(name, params) {
+  if (name === "run_command") {
+    return { kind: "CMD", detail: shortText(String(params.CommandLine ?? params.Command ?? params.command ?? ""), 200) };
+  }
+  if (name === "call_mcp_tool") {
+    const label = [String(params.ServerName ?? ""), String(params.ToolName ?? "")].filter(Boolean).join("/");
+    return { kind: "MSG", detail: shortText(`mcp ${label || name}`, 200) };
+  }
+  const target = getFileTarget(params) || firstString(params, ["DirectoryPath", "directoryPath", "SearchPath", "searchPath"]);
+  if (isBrainReadLike(name)) {
+    const query = String(params.Query ?? params.query ?? params.Pattern ?? params.pattern ?? "");
+    return { kind: "READ", detail: shortText(query || getBaseName(target) || name, 200) };
+  }
+  if (isEditLike(name)) {
+    return { kind: "EDIT", detail: shortText(getBaseName(target) || name, 200) };
+  }
+  return { kind: "MSG", detail: shortText(name, 200) };
+}
+
+// One-line events for the card log, the brain twin of mapAgyEntries. Tool
+// results (GENERIC lines) only feed the ERR and DONE lines: the tool call
+// already produced its own event.
+export function mapAgyBrainEntries(entries, ctx = {}) {
+  const list = entries ?? [];
+  const events = [];
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
+    if (!entry || typeof entry !== "object") continue;
+    const time = isoTime(entry.created_at);
+    if (entry.error) events.push({ time, kind: "ERR", detail: shortText(firstLine(entry.error), 150) });
+    if (entry.type !== "PLANNER_RESPONSE") continue;
+    for (const call of brainToolCalls(entry)) {
+      events.push({ time, ...brainEventForCall(String(call.name ?? ""), brainToolArgs(call)) });
+    }
+    const text = String(entry.content ?? "");
+    if (text.trim()) {
+      // A model step that closes the transcript is the final answer.
+      events.push(
+        index === list.length - 1
+          ? { time, kind: "DONE", detail: shortText(firstLine(text), 200) }
+          : { time, kind: "MSG", detail: shortText(firstLine(text), 200) }
+      );
+    }
+  }
+  return events;
+}
+
+// Full typed steps for the live view from the same brain transcript, reusing
+// the step types and helpers of the stream mapper. Ids come from step_index
+// so polling keeps them stable.
+export function mapAgyBrainSteps(entries, ctx = {}) {
+  const list = entries ?? [];
+  const steps = [];
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
+    if (!entry || typeof entry !== "object" || entry.type !== "PLANNER_RESPONSE") continue;
+    const stepIndex = entry.step_index ?? index;
+    const time = isoTime(entry.created_at);
+    const outcome = brainOutcome(list[index + 1]?.type === "GENERIC" ? list[index + 1] : null);
+
+    const thinking = String(entry.thinking ?? "");
+    if (thinking.trim()) {
+      steps.push(
+        capStep({
+          id: `agy-brain-${stepIndex}-think`,
+          time,
+          type: "thinking",
+          tool: "thinking",
+          status: "done",
+          title: "pensando",
+          data: { text: thinking, startedAt: null, endedAt: null }
+        })
+      );
+    }
+    const text = String(entry.content ?? "");
+    if (text.trim()) {
+      steps.push(
+        capStep({
+          id: `agy-brain-${stepIndex}-text`,
+          time,
+          type: "message",
+          tool: "text",
+          status: "done",
+          title: firstSentence(text),
+          data: { text }
+        })
+      );
+    }
+    brainToolCalls(entry).forEach((call, callIndex) => {
+      steps.push(brainCallStep(call, `agy-brain-${stepIndex}-${callIndex}`, time, outcome, ctx));
+    });
+  }
+  return lastSteps(steps);
+}
+
+function brainCallStep(call, id, time, outcome, ctx) {
+  const name = String(call?.name ?? "");
+  const params = brainToolArgs(call);
+  const error = outcome.status === "error" ? String(outcome.output ?? "") : "";
+  const path =
+    getFileTarget(params) || firstString(params, ["DirectoryPath", "directoryPath", "SearchPath", "searchPath"]);
+  const label = shortText(shortPath(path, ctx.repo, ctx.worktreeParent), 120);
+
+  if (name === "run_command") {
+    return commandStep({
+      id,
+      time,
+      tool: name,
+      status: outcome.status,
+      command: String(params.CommandLine ?? params.Command ?? params.command ?? ""),
+      output: outcome.output ?? "",
+      exitCode: outcome.exitCode
+    });
+  }
+  if (name === "call_mcp_tool") return brainMcpStep(id, time, name, params, outcome);
+  if (isBrainReadLike(name)) {
+    const query = String(params.Query ?? params.query ?? params.Pattern ?? params.pattern ?? "");
+    return capStep({
+      id,
+      time,
+      type: "read",
+      tool: name,
+      status: outcome.status,
+      ...(path ? { path } : {}),
+      title: query ? `buscar «${shortText(query, 100)}»${label ? ` en ${label}` : ""}` : `leer ${label}`,
+      data: error ? { error } : {}
+    });
+  }
+  if (isEditLike(name)) {
+    if (/write|create/i.test(name)) {
+      return capStep({
+        id,
+        time,
+        type: "write",
+        tool: name,
+        status: outcome.status,
+        ...(path ? { path } : {}),
+        title: `escribir ${label}`,
+        data: { content: firstText(params, WRITE_CONTENT_KEYS), ...(error ? { error } : {}) }
+      });
+    }
+    const chunks = chunkEdits(params);
+    if (chunks) {
+      return capStep({
+        id,
+        time,
+        type: "edit",
+        tool: name,
+        status: outcome.status,
+        ...(path ? { path } : {}),
+        title: `editar ${label} (${chunks.length} cambios)`,
+        data: { edits: chunks, ...(error ? { error } : {}) }
+      });
+    }
+    return capStep({
+      id,
+      time,
+      type: "edit",
+      tool: name,
+      status: outcome.status,
+      ...(path ? { path } : {}),
+      title: `editar ${label}`,
+      data: { oldText: firstText(params, EDIT_OLD_KEYS), newText: firstText(params, EDIT_NEW_KEYS), ...(error ? { error } : {}) }
+    });
+  }
+  return capStep({
+    id,
+    time,
+    type: "tool",
+    tool: name,
+    status: outcome.status,
+    title: toolTitle(name, params),
+    data: { name, params, result: outcome.output ?? null }
+  });
+}
+
+function brainMcpStep(id, time, name, params, outcome) {
+  const server = String(params.ServerName ?? "");
+  const tool = String(params.ToolName ?? "");
+  const args = params.Arguments && typeof params.Arguments === "object" ? params.Arguments : {};
+  const output = outcome.output ?? "";
+  if (memoryAction(tool)) return memoryStep({ id, time, tool, status: outcome.status, input: args, output: output || null });
+  const label = [server, tool].filter(Boolean).join("/") || name;
+  return capStep({
+    id,
+    time,
+    type: "tool",
+    tool: label,
+    status: outcome.status,
+    title: label,
+    data: { name: tool || label, server: server || null, params: args, result: output || null }
+  });
+}
+
+function firstString(source, names) {
+  for (const name of names) {
+    if (typeof source?.[name] === "string" && source[name]) return source[name];
+  }
+  return "";
+}
+
 export async function activity(worker, ctx = {}) {
   const file = worker?.activityFile;
   if (!file) return { events: [], notice: "sin actividad visible" };
@@ -329,7 +594,10 @@ export async function activity(worker, ctx = {}) {
     // agy streams the final answer as hundreds of tiny text_delta lines, so a
     // 200-line tail would hold nothing but the answer; the byte cap still bounds it.
     const entries = parseJsonlTail(text, AGY_TAIL_LINES);
-    const events = mapAgyEntries(entries, { ...ctx, mtimeMs });
+    const events =
+      worker?.activityFormat === "brain"
+        ? mapAgyBrainEntries(entries, { ...ctx, mtimeMs })
+        : mapAgyEntries(entries, { ...ctx, mtimeMs });
     return { events, notice: events.length ? null : "sin actividad visible" };
   } catch {
     return { events: [], notice: "sin actividad visible" };
@@ -343,7 +611,7 @@ export async function steps(worker, ctx = {}) {
   try {
     const text = readFileTail(file);
     const entries = parseJsonlTail(text, AGY_TAIL_LINES);
-    const mapped = mapAntigravitySteps(entries, ctx);
+    const mapped = worker?.activityFormat === "brain" ? mapAgyBrainSteps(entries, ctx) : mapAntigravitySteps(entries, ctx);
     return { steps: mapped, notice: mapped.length ? null : "sin pasos visibles" };
   } catch {
     return { steps: [], notice: "sin actividad visible" };
