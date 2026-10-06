@@ -339,8 +339,57 @@ async function buildWorker(track, ctx) {
     workdir,
     branch,
     lastCommit,
-    activity
+    activity,
+    stepsSupported: typeof adapter.steps === "function"
   };
+}
+
+// Computes the full typed steps of one worker for GET /api/steps. Returns null
+// for an unknown worker; engines without a step mapper report unsupported. The
+// kit/config resolution mirrors buildSnapshot, and the adapter supplies the
+// raw records (OpenCode reads its server, Claude Code reads its activityFile).
+export async function buildWorkerSteps(config, options = {}) {
+  const project = options.project;
+  const name = String(options.worker ?? "");
+  if (!project || !name) return null;
+  const now = options.now ?? new Date();
+  const baseDir = config.__baseDir ?? process.cwd();
+
+  let kit = null;
+  let kitDir = null;
+  if (project.kitConfig) {
+    try {
+      kit = JSON.parse(fs.readFileSync(project.kitConfig, "utf8"));
+      kitDir = path.dirname(project.kitConfig);
+    } catch {
+      kit = null;
+      kitDir = null;
+    }
+  }
+  const track = (kit?.tracks ?? []).find((entry) => entry && String(entry.name ?? "") === name);
+  if (!track) return null;
+
+  const repo =
+    project.repo ??
+    (kit?.repo ? path.resolve(kitDir ?? baseDir, expandVars(String(kit.repo))) : null);
+  const worktreeParent = kit?.worktreeParent
+    ? path.resolve(kitDir ?? baseDir, expandVars(String(kit.worktreeParent)))
+    : null;
+  const ctx = { config, kit, kitDir, repo, worktreeParent, now, project };
+  const status = readJson(kitDir ? path.join(kitDir, `status-${name}.json`) : null);
+  const engine = status?.engine || track.engine || "opencode";
+  const adapter = ADAPTERS[ENGINE_TO_ADAPTER[engine] ?? "opencode"];
+  if (typeof adapter.steps !== "function") {
+    return { engine, steps: [], unsupported: true };
+  }
+  const workdir = resolveKitPath(track.workdir, kit, kitDir, baseDir);
+  const activityFile = resolveKitPath(track.activityFile, kit, kitDir, baseDir);
+  try {
+    const result = await adapter.steps({ name, workdir, activityFile }, ctx);
+    return { engine, steps: result?.steps ?? [], notice: result?.notice ?? null };
+  } catch {
+    return { engine, steps: [], notice: "sin pasos visibles" };
+  }
 }
 
 // Red is only for real failures. A busy PC can delay the supervisor heartbeat

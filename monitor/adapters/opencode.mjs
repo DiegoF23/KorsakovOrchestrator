@@ -8,6 +8,7 @@ import fs from "node:fs";
 import { promisify } from "node:util";
 
 import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { capStep, commandStep, lastSteps, memoryAction, memoryStep, numberOrNull, stepStatus, toolTitle } from "../lib/steps.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -75,6 +76,109 @@ export function mapOpenCodeMessages(messages, ctx = {}) {
     }
   }
   return events;
+}
+
+// Full, typed steps for the live view. Unlike mapOpenCodeMessages (the short
+// activity lines the cards use), every tool output, edit diff and memory call
+// is kept so a specialised viewer can replay it. Pure; exported for tests.
+export function mapOpenCodeSteps(messages, ctx = {}) {
+  const steps = [];
+  let index = 0;
+  for (const message of messages ?? []) {
+    const info = message?.info ?? {};
+    const time = toIso(info.time?.completed ?? info.time?.created);
+    for (const part of message?.parts ?? []) {
+      index += 1;
+      if (!part || typeof part !== "object") continue;
+      if (part.type === "tool") {
+        steps.push(openCodeToolStep(part, time, index, ctx));
+      } else if (part.type === "text" && info.role === "assistant" && part.text) {
+        steps.push(
+          capStep({
+            id: part.id ?? `text-${index}`,
+            time,
+            type: "message",
+            tool: "text",
+            status: "done",
+            title: firstSentence(part.text),
+            data: { text: part.text }
+          })
+        );
+      }
+    }
+  }
+  return lastSteps(steps);
+}
+
+function openCodeToolStep(part, time, index, ctx) {
+  const tool = String(part.tool ?? "");
+  const state = part.state ?? {};
+  const input = state.input ?? {};
+  const status = stepStatus(state.status);
+  const id = part.id ?? `${tool}-${index}`;
+  if (memoryAction(tool)) {
+    return memoryStep({ id, time, tool, status, input, output: state.output ?? null });
+  }
+  if (tool === "bash") {
+    return commandStep({
+      id,
+      time,
+      tool,
+      status,
+      command: input.command ?? "",
+      output: state.output ?? "",
+      exitCode: numberOrNull(state.metadata?.exit)
+    });
+  }
+  const filePath = input.filePath ?? input.path ?? null;
+  const path = filePath ? String(filePath) : null;
+  const label = shortText(shortPath(String(filePath ?? ""), ctx.repo, ctx.worktreeParent), 120);
+  if (tool === "write") {
+    return capStep({
+      id,
+      time,
+      type: "write",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: `escribir ${label}`,
+      data: { content: input.content ?? "" }
+    });
+  }
+  if (tool === "edit") {
+    return capStep({
+      id,
+      time,
+      type: "edit",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: `editar ${label}`,
+      data: { oldText: input.oldString ?? "", newText: input.newString ?? "" }
+    });
+  }
+  if (tool === "read" || tool === "grep" || tool === "glob") {
+    const pattern = input.pattern ? String(input.pattern) : "";
+    return capStep({
+      id,
+      time,
+      type: "read",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: pattern ? `buscar «${shortText(pattern, 100)}»${label ? ` en ${label}` : ""}` : `leer ${label}`,
+      data: {}
+    });
+  }
+  return capStep({
+    id,
+    time,
+    type: "tool",
+    tool,
+    status,
+    title: toolTitle(tool, input),
+    data: { name: tool, params: input, result: state.output ?? null }
+  });
 }
 
 export function sumEstimatePct(rows) {
@@ -183,32 +287,50 @@ export async function usage(ctx = {}) {
 }
 
 export async function activity(worker, ctx = {}) {
-  const host = ctx.kit?.server?.host ?? "127.0.0.1";
-  const port = ctx.kit?.server?.port;
-  if (!port) return { events: [], notice: "sin actividad visible" };
-  const base = `http://${host}:${port}`;
   try {
-    const directory = worker?.workdir ?? "";
-    const url = directory
-      ? `${base}/session?directory=${encodeURIComponent(directory)}`
-      : `${base}/session`;
-    const sessions = await fetchJson(url, 5000);
-    if (!Array.isArray(sessions) || sessions.length === 0) {
-      return { events: [], notice: "sin sesión activa" };
-    }
-    const wanted = normalizeDir(directory);
-    const inDir = wanted
-      ? sessions.filter((session) => normalizeDir(session?.directory) === wanted)
-      : sessions;
-    if (inDir.length === 0) return { events: [], notice: "sin sesión activa" };
-    const picked = inDir.sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0];
-    if (!picked?.id) return { events: [], notice: "sin sesión activa" };
-    const messages = await fetchJson(`${base}/session/${encodeURIComponent(picked.id)}/message`, 8000);
+    const { messages, notice } = await fetchSessionMessages(worker, ctx);
+    if (notice) return { events: [], notice };
     const events = mapOpenCodeMessages(messages, ctx).slice(-15);
     return { events, notice: events.length ? null : "sin eventos" };
   } catch {
     return { events: [], notice: "sin sesión activa" };
   }
+}
+
+// The same messages feed the typed steps, without the 15-event trim.
+export async function steps(worker, ctx = {}) {
+  try {
+    const { messages, notice } = await fetchSessionMessages(worker, ctx);
+    if (notice) return { steps: [], notice };
+    const mapped = mapOpenCodeSteps(messages, ctx);
+    return { steps: mapped, notice: mapped.length ? null : "sin pasos visibles" };
+  } catch {
+    return { steps: [], notice: "sin sesión activa" };
+  }
+}
+
+// Picks the newest session of the worker directory and returns its messages;
+// `notice` explains why there is nothing to read, mirroring the activity card.
+async function fetchSessionMessages(worker, ctx) {
+  const host = ctx.kit?.server?.host ?? "127.0.0.1";
+  const port = ctx.kit?.server?.port;
+  if (!port) return { messages: null, notice: "sin actividad visible" };
+  const base = `http://${host}:${port}`;
+  const directory = worker?.workdir ?? "";
+  const url = directory
+    ? `${base}/session?directory=${encodeURIComponent(directory)}`
+    : `${base}/session`;
+  const sessions = await fetchJson(url, 5000);
+  const wanted = normalizeDir(directory);
+  const inDir = Array.isArray(sessions)
+    ? wanted
+      ? sessions.filter((session) => normalizeDir(session?.directory) === wanted)
+      : sessions
+    : [];
+  const picked = inDir.sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0];
+  if (!picked?.id) return { messages: null, notice: "sin sesión activa" };
+  const messages = await fetchJson(`${base}/session/${encodeURIComponent(picked.id)}/message`, 8000);
+  return { messages, notice: null };
 }
 
 async function runEstimate(script, sinceMs, ctx) {

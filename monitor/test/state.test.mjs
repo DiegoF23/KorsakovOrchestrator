@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   applyBranchColors,
   buildSnapshot,
+  buildWorkerSteps,
   buildWorkers,
   GIT_LOG_LIMIT,
   hideFinishedWorkers,
@@ -242,6 +243,36 @@ test("a worker card carries its status time so finished cards can age out", asyn
   assert.equal(result.hiddenFinished, 1);
   assert.equal(result.hiddenWorkers.length, 1);
   assert.equal(result.hiddenWorkers[0].name, "oc-a");
+});
+
+test("buildWorkerSteps maps a Claude track and flags engines without a mapper", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-worker-steps-"));
+  const transcript = path.join(dir, "agent.jsonl");
+  fs.copyFileSync(path.join(here, "fixtures", "claude-steps.jsonl"), transcript);
+  const kitConfig = path.join(dir, "kit.config.json");
+  fs.writeFileSync(
+    kitConfig,
+    JSON.stringify({
+      tracks: [
+        { name: "claude-a", engine: "claude-code", activityFile: transcript, board: true },
+        { name: "codex-a", engine: "codex", board: true }
+      ]
+    })
+  );
+  const config = { __baseDir: dir, workers: { kitConfig } };
+  const project = { id: "p", name: "P", repo: null, kitConfig };
+
+  const claude = await buildWorkerSteps(config, { project, worker: "claude-a" });
+  assert.equal(claude.engine, "claude-code");
+  assert.ok(claude.steps.length > 0);
+  assert.equal(claude.steps[0].type, "message");
+  assert.equal(claude.unsupported, undefined);
+
+  const codex = await buildWorkerSteps(config, { project, worker: "codex-a" });
+  assert.deepEqual(codex, { engine: "codex", steps: [], unsupported: true });
+
+  assert.equal(await buildWorkerSteps(config, { project, worker: "nope" }), null);
+  assert.equal(await buildWorkerSteps(config, { project, worker: "" }), null);
 });
 
 test("worker cards take the colour of their branch lane, neutral when the tree lacks it", () => {

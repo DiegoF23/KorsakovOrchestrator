@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   activity as claudeActivity,
   mapClaudeEntries,
+  mapClaudeSteps,
   mapClaudeUsage,
   parseJsonlTail,
   readFileTail,
@@ -18,7 +19,7 @@ import {
   activity as agyActivity
 } from "../adapters/antigravity.mjs";
 import { mapCodexLogLine, mapCodexUsage, parseRateLimitsEvent, parseRateLimitsFromText } from "../adapters/codex.mjs";
-import { mapOpenCodeMessages, mergeOfficialUsage, sumEstimatePct } from "../adapters/opencode.mjs";
+import { mapOpenCodeMessages, mapOpenCodeSteps, mergeOfficialUsage, sumEstimatePct } from "../adapters/opencode.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.join(here, "fixtures");
@@ -384,4 +385,202 @@ test("antigravity activity reads the worker activityFile and degrades quietly", 
   fs.writeFileSync(broken, "not json\nstill not json\n");
   const malformed = await agyActivity({ name: "x", activityFile: broken }, CTX);
   assert.deepEqual(malformed, { events: [], notice: "sin actividad visible" });
+});
+
+test("opencode message parts map to full typed steps", () => {
+  const messages = JSON.parse(read("opencode-steps.json"));
+  const steps = mapOpenCodeSteps(messages, CTX);
+
+  assert.deepEqual(
+    steps.map((step) => `${step.type}/${step.status}`),
+    [
+      "write/done",
+      "edit/done",
+      "read/done",
+      "read/done",
+      "command/done",
+      "memory/done",
+      "memory/done",
+      "tool/done",
+      "message/done",
+      "write/running",
+      "command/error",
+      "tool/running"
+    ]
+  );
+  assert.deepEqual(
+    steps.map((step) => step.id),
+    ["t1", "t2", "t3", "t4", "t5", "t6", "t7", "t8", "t9", "t10", "t11", "t12"]
+  );
+  assert.equal(steps[0].time, new Date(1759485601000).toISOString());
+
+  const write = steps[0];
+  assert.equal(write.path, "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\web-monitor\\apps\\web\\src\\a.tsx");
+  assert.equal(write.title, "escribir apps\\web\\src\\a.tsx");
+  assert.equal(write.data.content, "export const a = 1;\n");
+
+  assert.deepEqual(steps[1].data, { oldText: "const a = 1", newText: "const a = 2" });
+  assert.equal(steps[2].title, "leer apps\\api\\src\\x.ts");
+  assert.equal(steps[3].title, "buscar «TODO» en apps");
+
+  assert.deepEqual(steps[4].data, { command: "node --test", output: "pass 12\n", exitCode: 0 });
+
+  const save = steps[5];
+  assert.equal(save.type, "memory");
+  assert.equal(save.tool, "engram_mem_save");
+  assert.equal(save.data.action, "save");
+  assert.equal(save.data.title, "Steps API");
+  assert.equal(save.data.memoryType, "architecture");
+  assert.equal(save.data.content, "se guardan pasos tipados");
+
+  const search = steps[6];
+  assert.equal(search.tool, "mcp__plugin_engram_engram__mem_search");
+  assert.equal(search.data.action, "search");
+  assert.equal(search.data.query, "typed steps");
+  assert.equal(search.data.results, "[{\"id\":1}]");
+
+  const tool = steps[7];
+  assert.equal(tool.data.name, "task");
+  assert.equal(tool.data.params.description, "explore the repo");
+  assert.equal(tool.data.result, "done");
+
+  assert.equal(steps[8].data.text, "Listo, corregi el formulario. Sigo con las pruebas.");
+  assert.equal(steps[8].title, "Listo, corregi el formulario.");
+
+  assert.equal(steps[10].data.output, "boom in the test run");
+  assert.equal(steps[10].data.exitCode, null);
+  assert.equal(steps[11].data.result, null);
+});
+
+test("claude transcript entries map to full typed steps joined by tool_use_id", () => {
+  const entries = parseJsonlTail(read("claude-steps.jsonl"));
+  const steps = mapClaudeSteps(entries, CTX);
+
+  assert.deepEqual(
+    steps.map((step) => `${step.type}/${step.status}`),
+    [
+      "message/done",
+      "write/done",
+      "edit/done",
+      "edit/done",
+      "read/done",
+      "read/done",
+      "command/done",
+      "command/error",
+      "memory/done",
+      "memory/done",
+      "tool/running",
+      "tool/running"
+    ]
+  );
+  assert.deepEqual(
+    steps.map((step) => step.id),
+    [
+      "text-2026-10-04T10:00:01.000Z-1",
+      "toolu_w",
+      "toolu_e",
+      "toolu_m",
+      "toolu_r",
+      "toolu_g",
+      "toolu_b",
+      "toolu_bf",
+      "toolu_ms",
+      "toolu_mq",
+      "toolu_t",
+      "toolu_run"
+    ],
+    "tool ids are stable for polling"
+  );
+
+  const write = steps[1];
+  assert.equal(write.title, "escribir apps\\web\\src\\a.tsx");
+  assert.equal(write.data.content, "export const a = 1;\n");
+
+  assert.deepEqual(steps[2].data, { oldText: "const a = 1", newText: "const a = 2" });
+
+  const multi = steps[3];
+  assert.equal(multi.path, "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo\\apps\\api\\src\\y.ts");
+  assert.deepEqual(multi.data.edits, [
+    { oldText: "1", newText: "2" },
+    { oldText: "3", newText: "4" }
+  ]);
+
+  assert.equal(steps[5].title, "buscar «activityFile» en apps");
+  assert.deepEqual(steps[6].data, { command: "node --test", output: "all tests pass", exitCode: 0 });
+
+  const failed = steps[7];
+  assert.equal(failed.status, "error");
+  assert.equal(failed.data.output, "Exit code 1\nboom in the test run");
+  assert.equal(failed.data.exitCode, 1);
+
+  assert.equal(steps[8].data.action, "save");
+  assert.equal(steps[8].data.memoryType, "decision");
+  assert.equal(steps[9].data.action, "search");
+  assert.equal(steps[9].data.results, "[{ \"id\": 7 }]");
+
+  assert.equal(steps[10].title, "Task: explore the repo");
+  assert.equal(steps[11].type, "tool");
+  assert.equal(steps[11].data.result, null);
+});
+
+test("both step mappers cap text, drop binary data and keep the last 300 steps", () => {
+  const long = "x".repeat(200001);
+  const binary = "before\u0000after";
+
+  const openCode = mapOpenCodeSteps(
+    [
+      {
+        info: { role: "assistant", time: { created: 1 } },
+        parts: [
+          { id: "long", type: "tool", tool: "write", state: { status: "completed", input: { filePath: "a.ts", content: long } } },
+          { id: "bin", type: "tool", tool: "webfetch", state: { status: "completed", input: {}, output: binary } }
+        ]
+      }
+    ],
+    CTX
+  );
+  assert.equal(openCode[0].data.content.length, 200000);
+  assert.equal(openCode[0].truncated, true);
+  assert.equal(openCode[1].data.result, "[datos binarios omitidos]");
+  assert.equal(openCode[1].truncated, true);
+
+  const claude = mapClaudeSteps(
+    [
+      {
+        type: "assistant",
+        uuid: "u1",
+        timestamp: "2026-10-04T10:00:00Z",
+        message: { role: "assistant", content: [{ type: "tool_use", id: "long", name: "Write", input: { file_path: "a.ts", content: long } }] }
+      }
+    ],
+    CTX
+  );
+  assert.equal(claude[0].data.content.length, 200000);
+  assert.equal(claude[0].truncated, true);
+
+  const manyParts = Array.from({ length: 310 }, (_, i) => ({ id: `p${i}`, type: "text", text: `linea ${i}` }));
+  const openCodeMany = mapOpenCodeSteps([{ info: { role: "assistant" }, parts: manyParts }], CTX);
+  assert.equal(openCodeMany.length, 300);
+  assert.equal(openCodeMany[0].id, "p10");
+
+  const manyEntries = Array.from({ length: 310 }, (_, i) => ({
+    type: "assistant",
+    uuid: `u${i}`,
+    timestamp: "2026-10-04T10:00:00Z",
+    message: { role: "assistant", content: [{ type: "text", text: `linea ${i}` }] }
+  }));
+  const claudeMany = mapClaudeSteps(manyEntries, CTX);
+  assert.equal(claudeMany.length, 300);
+  assert.equal(claudeMany[0].data.text, "linea 10");
+});
+
+test("command output keeps ANSI color escapes but binary content is replaced", async () => {
+  const { commandStep, capStep } = await import("../lib/steps.mjs");
+  const colored = "\u001b[32mok\u001b[0m 3 passed";
+  const step = commandStep({ id: "c1", time: null, tool: "bash", status: "done", command: "npm test", output: colored, exitCode: 0 });
+  assert.equal(step.data.output, colored);
+  assert.equal(step.truncated, undefined);
+  const binary = capStep({ id: "b1", data: { content: "PNG\u0000\u0001\u0002" } });
+  assert.equal(binary.data.content, "[datos binarios omitidos]");
+  assert.equal(binary.truncated, true);
 });
