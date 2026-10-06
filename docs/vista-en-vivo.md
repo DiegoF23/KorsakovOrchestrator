@@ -25,6 +25,7 @@ Lo más informativo posible del paso a paso de la IA. Cada herramienta que usa e
 | Video (mp4, webm) | Mismo ícono animado mientras se genera; al terminar, reproductor en la pestaña. |
 | Terminal (comandos) | Mini terminal: el comando se tipea y la salida se va escribiendo, con colores ANSI. |
 | Memoria (Engram: `mem_save`, `mem_search`, etc.) | Ficha de memoria: título, tipo y contenido guardado, escribiéndose; en búsquedas, la consulta y los resultados. |
+| Pensando (razonamiento del modelo) | Mientras piensa: cerebro/circuito animado con el tema y un contador "pensando 1:23", para que no parezca colgado. Al terminar: "pensó 2:35" y el razonamiento escribiéndose (plegable si es largo). Todos los razonamientos comparten una pestaña "pensando". |
 | Otras herramientas (MCP, web, subagentes) | Nombre de la herramienta, sus parámetros y la respuesta resumida. |
 | PDF | Visor del navegador dentro de la misma pestaña (como Claude Desktop). |
 | Otros binarios o archivos muy grandes | Ficha con nombre, tamaño y tipo; sin contenido. Botones para copiar la ruta y para abrir el Explorador de Windows con el archivo seleccionado. |
