@@ -60,6 +60,22 @@ export function lastSteps(steps) {
   return (steps ?? []).slice(-MAX_STEPS);
 }
 
+// Deterministic short id for records without a native id (FNV-1a over the
+// parts). The adapters hash position + tool name so the same record keeps the
+// same id across polls even when the source has no call id of its own.
+export function hashId(...parts) {
+  let hash = 0x811c9dc5;
+  for (const text of parts.map((part) => String(part ?? ""))) {
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 0x01000193) >>> 0;
+    }
+    hash ^= 0x1f;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
 // "mcp__plugin_engram_engram__mem_search" -> "search"; null when the tool is
 // not an Engram call.
 export function memoryAction(tool) {

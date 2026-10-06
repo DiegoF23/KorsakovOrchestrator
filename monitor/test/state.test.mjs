@@ -245,17 +245,21 @@ test("a worker card carries its status time so finished cards can age out", asyn
   assert.equal(result.hiddenWorkers[0].name, "oc-a");
 });
 
-test("buildWorkerSteps maps a Claude track and flags engines without a mapper", async () => {
+test("buildWorkerSteps maps Claude, Codex and Antigravity tracks", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-worker-steps-"));
   const transcript = path.join(dir, "agent.jsonl");
   fs.copyFileSync(path.join(here, "fixtures", "claude-steps.jsonl"), transcript);
+  fs.copyFileSync(path.join(here, "fixtures", "codex-steps.jsonl"), path.join(dir, "log-codex-a-1.jsonl"));
+  const agyTranscript = path.join(dir, "agy.ndjson");
+  fs.copyFileSync(path.join(here, "fixtures", "agy-steps.ndjson"), agyTranscript);
   const kitConfig = path.join(dir, "kit.config.json");
   fs.writeFileSync(
     kitConfig,
     JSON.stringify({
       tracks: [
         { name: "claude-a", engine: "claude-code", activityFile: transcript, board: true },
-        { name: "codex-a", engine: "codex", board: true }
+        { name: "codex-a", engine: "codex", board: true },
+        { name: "agy-a", engine: "antigravity", activityFile: agyTranscript, board: true }
       ]
     })
   );
@@ -269,7 +273,16 @@ test("buildWorkerSteps maps a Claude track and flags engines without a mapper", 
   assert.equal(claude.unsupported, undefined);
 
   const codex = await buildWorkerSteps(config, { project, worker: "codex-a" });
-  assert.deepEqual(codex, { engine: "codex", steps: [], unsupported: true });
+  assert.equal(codex.engine, "codex");
+  assert.ok(codex.steps.length > 0, "codex workers are no longer unsupported");
+  assert.equal(codex.unsupported, undefined);
+  assert.ok(codex.steps.some((step) => step.type === "command"));
+
+  const agy = await buildWorkerSteps(config, { project, worker: "agy-a" });
+  assert.equal(agy.engine, "antigravity");
+  assert.ok(agy.steps.length > 0, "antigravity workers are no longer unsupported");
+  assert.equal(agy.unsupported, undefined);
+  assert.ok(agy.steps.some((step) => step.type === "command"));
 
   assert.equal(await buildWorkerSteps(config, { project, worker: "nope" }), null);
   assert.equal(await buildWorkerSteps(config, { project, worker: "" }), null);

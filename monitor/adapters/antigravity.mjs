@@ -1,11 +1,19 @@
 import fs from "node:fs";
-import { shortText } from "../lib/format.mjs";
+import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { capStep, commandStep, hashId, lastSteps, memoryAction, memoryStep, numberOrNull, toolTitle } from "../lib/steps.mjs";
 import { readFileTail, parseJsonlTail } from "./claude-code.mjs";
 
 export const AGY_TAIL_LINES = 5000;
-
 export const id = "antigravity";
 export const label = "Antigravity";
+
+// Parameter names verified against the agy stream samples (AbsolutePath,
+// TargetFile, CommandLine, ServerName/ToolName/Arguments); the write/edit
+// content fields (CodeContent, TargetContent/ReplacementContent and
+// ReplacementChunks) are read with their camelCase twins.
+const WRITE_CONTENT_KEYS = ["CodeContent", "codeContent", "Content", "content", "Code", "code"];
+const EDIT_OLD_KEYS = ["TargetContent", "targetContent", "OldContent", "oldContent"];
+const EDIT_NEW_KEYS = ["ReplacementContent", "replacementContent", "NewContent", "newContent", "CodeContent", "codeContent"];
 
 export async function usage(ctx = {}) {
   return {
@@ -121,6 +129,190 @@ export function mapAgyEntries(entries, ctx = {}) {
   return events;
 }
 
+// Full, typed steps for the live view, from the same activityFile the card
+// reads. Each tool call keeps one step, updated in place while it runs and
+// completed on DONE (or ERROR); streamed agent_response deltas accumulate into
+// a single message per step_index, so a long answer never floods the stream.
+// Pure; exported for tests.
+export function mapAntigravitySteps(entries, ctx = {}) {
+  const steps = [];
+  const positions = new Map();
+  const pendingText = new Map();
+  const push = (step) => {
+    if (positions.has(step.id)) steps[positions.get(step.id)] = step;
+    else {
+      positions.set(step.id, steps.length);
+      steps.push(step);
+    }
+  };
+
+  let index = 0;
+  for (const entry of entries ?? []) {
+    if (!entry || typeof entry !== "object") continue;
+    const update = entry.event === "step_update" ? entry.step_update : null;
+    if (!update || typeof update !== "object") continue;
+    index += 1;
+    if (update.step_type === "tool") {
+      const step = antigravityToolStep(update, index, ctx);
+      if (step) push(step);
+    } else if (update.step_type === "agent_response") {
+      const key = `${update.conversation_id ?? "stream"}:${update.step_index ?? index}`;
+      const text = `${pendingText.get(key) ?? ""}${update.text_delta ?? ""}`;
+      if (update.state === "DONE" || update.state === "ERROR") {
+        pendingText.delete(key);
+        const trimmed = text.trim();
+        if (trimmed) push(antigravityMessageStep(key, trimmed, update.state));
+      } else {
+        pendingText.set(key, text);
+      }
+    }
+  }
+  return lastSteps(steps);
+}
+
+function antigravityToolStep(update, index, ctx) {
+  const name = String(update.tool_name ?? "");
+  const info = update.tool_info && typeof update.tool_info === "object" ? update.tool_info : {};
+  const params = info.parameters && typeof info.parameters === "object" ? info.parameters : {};
+  const state = String(update.state ?? "");
+  const status = state === "ERROR" ? "error" : state === "DONE" ? "done" : "running";
+  const id = antigravityId(update, "tool", index);
+  const error = state === "ERROR" ? firstLine(info.error?.message) : "";
+  const path = getFileTarget(params);
+  const label = shortText(shortPath(path, ctx.repo, ctx.worktreeParent), 120);
+
+  if (name === "run_command") {
+    const exitCode = numberOrNull(info.exit_code ?? info.exitCode ?? params.ExitCode ?? params.exitCode);
+    return commandStep({
+      id,
+      time: null,
+      tool: name,
+      status: exitCode !== null && exitCode !== 0 ? "error" : status,
+      command: String(params.CommandLine ?? params.Command ?? params.command ?? ""),
+      output: error || String(info.output ?? ""),
+      exitCode
+    });
+  }
+  if (name === "call_mcp_tool") return antigravityMcpStep(id, name, params, info, status, error);
+  if (isReadLike(name)) {
+    const query = String(params.Query ?? params.query ?? params.Pattern ?? params.pattern ?? "");
+    return capStep({
+      id,
+      time: null,
+      type: "read",
+      tool: name,
+      status,
+      ...(path ? { path } : {}),
+      title: query ? `buscar «${shortText(query, 100)}»${label ? ` en ${label}` : ""}` : `leer ${label}`,
+      data: error ? { error } : {}
+    });
+  }
+  if (isEditLike(name)) {
+    if (/write|create/i.test(name)) {
+      return capStep({
+        id,
+        time: null,
+        type: "write",
+        tool: name,
+        status,
+        ...(path ? { path } : {}),
+        title: `escribir ${label}`,
+        data: { content: firstText(params, WRITE_CONTENT_KEYS), ...(error ? { error } : {}) }
+      });
+    }
+    const chunks = chunkEdits(params);
+    if (chunks) {
+      return capStep({
+        id,
+        time: null,
+        type: "edit",
+        tool: name,
+        status,
+        ...(path ? { path } : {}),
+        title: `editar ${label} (${chunks.length} cambios)`,
+        data: { edits: chunks, ...(error ? { error } : {}) }
+      });
+    }
+    return capStep({
+      id,
+      time: null,
+      type: "edit",
+      tool: name,
+      status,
+      ...(path ? { path } : {}),
+      title: `editar ${label}`,
+      data: { oldText: firstText(params, EDIT_OLD_KEYS), newText: firstText(params, EDIT_NEW_KEYS), ...(error ? { error } : {}) }
+    });
+  }
+  return capStep({
+    id,
+    time: null,
+    type: "tool",
+    tool: name,
+    status,
+    title: toolTitle(name, params),
+    data: { name, params, result: error || info.output || null }
+  });
+}
+
+function antigravityMcpStep(id, name, params, info, status, error) {
+  const server = String(params.ServerName ?? "");
+  const tool = String(params.ToolName ?? "");
+  const args = params.Arguments && typeof params.Arguments === "object" ? params.Arguments : {};
+  const output = error || (typeof info.output === "string" ? info.output : "");
+  if (memoryAction(tool)) return memoryStep({ id, time: null, tool, status, input: args, output: output || null });
+  const label = [server, tool].filter(Boolean).join("/") || name;
+  return capStep({
+    id,
+    time: null,
+    type: "tool",
+    tool: label,
+    status,
+    title: label,
+    data: { name: tool || label, server: server || null, params: args, result: output || null }
+  });
+}
+
+function antigravityMessageStep(key, text, state) {
+  return capStep({
+    id: `agy-msg-${hashId(key)}`,
+    time: null,
+    type: "message",
+    tool: "text",
+    status: state === "ERROR" ? "error" : "done",
+    title: firstSentence(text),
+    data: { text }
+  });
+}
+
+function antigravityId(update, kind, index) {
+  return `agy-${kind}-${hashId(update.conversation_id ?? "stream", update.step_index ?? index)}`;
+}
+
+function chunkEdits(params) {
+  const chunks = Array.isArray(params.ReplacementChunks)
+    ? params.ReplacementChunks
+    : Array.isArray(params.replacementChunks)
+      ? params.replacementChunks
+      : null;
+  if (!chunks || chunks.length === 0) return null;
+  return chunks.map((chunk) => ({
+    oldText: firstText(chunk, EDIT_OLD_KEYS),
+    newText: firstText(chunk, EDIT_NEW_KEYS)
+  }));
+}
+
+function firstText(source, names) {
+  for (const name of names) {
+    if (typeof source?.[name] === "string") return source[name];
+  }
+  return "";
+}
+
+function firstLine(value) {
+  return String(value ?? "").split(/\r?\n/)[0];
+}
+
 export async function activity(worker, ctx = {}) {
   const file = worker?.activityFile;
   if (!file) return { events: [], notice: "sin actividad visible" };
@@ -141,5 +333,19 @@ export async function activity(worker, ctx = {}) {
     return { events, notice: events.length ? null : "sin actividad visible" };
   } catch {
     return { events: [], notice: "sin actividad visible" };
+  }
+}
+
+// The same activityFile feeds the typed steps of the live view.
+export async function steps(worker, ctx = {}) {
+  const file = worker?.activityFile;
+  if (!file) return { steps: [], notice: "sin actividad visible" };
+  try {
+    const text = readFileTail(file);
+    const entries = parseJsonlTail(text, AGY_TAIL_LINES);
+    const mapped = mapAntigravitySteps(entries, ctx);
+    return { steps: mapped, notice: mapped.length ? null : "sin pasos visibles" };
+  } catch {
+    return { steps: [], notice: "sin actividad visible" };
   }
 }

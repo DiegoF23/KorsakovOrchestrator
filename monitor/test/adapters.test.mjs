@@ -16,9 +16,19 @@ import {
 } from "../adapters/claude-code.mjs";
 import {
   mapAgyEntries,
-  activity as agyActivity
+  mapAntigravitySteps,
+  activity as agyActivity,
+  steps as agySteps
 } from "../adapters/antigravity.mjs";
-import { mapCodexLogLine, mapCodexUsage, parseRateLimitsEvent, parseRateLimitsFromText } from "../adapters/codex.mjs";
+import {
+  mapCodexLogLine,
+  mapCodexSteps,
+  mapCodexUsage,
+  parseCodexPatch,
+  parseRateLimitsEvent,
+  parseRateLimitsFromText,
+  steps as codexSteps
+} from "../adapters/codex.mjs";
 import { mapOpenCodeMessages, mapOpenCodeSteps, mergeOfficialUsage, sumEstimatePct } from "../adapters/opencode.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -521,6 +531,316 @@ test("claude transcript entries map to full typed steps joined by tool_use_id", 
   assert.equal(steps[10].title, "Task: explore the repo");
   assert.equal(steps[11].type, "tool");
   assert.equal(steps[11].data.result, null);
+});
+
+test("codex rollout items map to full typed steps joined by call_id", () => {
+  const entries = parseJsonlTail(read("codex-steps.jsonl"));
+  const steps = mapCodexSteps(entries, CTX);
+
+  assert.deepEqual(
+    steps.map((step) => `${step.type}/${step.status}`),
+    [
+      "message/done",
+      "command/done",
+      "write/done",
+      "edit/done",
+      "tool/done",
+      "memory/done",
+      "command/error",
+      "tool/running",
+      "tool/done"
+    ]
+  );
+  assert.deepEqual(
+    steps.map((step) => step.id),
+    [
+      steps[0].id,
+      "call_cmd-0",
+      "call_patch-0",
+      "call_patch-1",
+      "call_patch-2",
+      "call_mem",
+      "call_fail-0",
+      "call_run",
+      "call_plan"
+    ],
+    "call ids are stable for polling"
+  );
+  assert.match(steps[0].id, /^msg-/);
+  assert.equal(steps[1].time, "2026-10-05T10:00:02.000Z");
+
+  const command = steps[1];
+  assert.deepEqual(command.data, {
+    command: "git status --short",
+    output: "On branch demo\nnothing to commit\nProcess exited with code 0\n",
+    exitCode: 0
+  });
+
+  const write = steps[2];
+  assert.equal(write.path, "docs/nuevo.md");
+  assert.equal(write.title, "escribir docs/nuevo.md");
+  assert.equal(write.data.content, "linea nueva\notra linea");
+
+  assert.deepEqual(steps[3].data, { oldText: "const a = 1;\nconst b = 2;", newText: "const a = 1;\nconst b = 3;" });
+
+  const removed = steps[4];
+  assert.equal(removed.type, "tool");
+  assert.equal(removed.path, "tmp/viejo.txt");
+  assert.equal(removed.title, "borrado: tmp/viejo.txt");
+
+  const memory = steps[5];
+  assert.equal(memory.tool, "mcp__engram__mem_save");
+  assert.equal(memory.data.action, "save");
+  assert.equal(memory.data.title, "Nota de steps");
+  assert.equal(memory.data.memoryType, "decision");
+  assert.equal(memory.data.content, "se mapean pasos tipados");
+  assert.equal(memory.data.results, "guardado");
+
+  const failed = steps[6];
+  assert.equal(failed.status, "error");
+  assert.equal(failed.data.exitCode, 1);
+  assert.match(failed.data.output, /boom en la corrida/);
+
+  assert.equal(steps[7].title, "wait");
+  assert.equal(steps[7].data.result, null);
+  assert.equal(steps[8].data.params.steps.join(","), "uno,dos");
+  assert.equal(steps[8].data.result, "ok");
+
+  assert.deepEqual(
+    mapCodexSteps(entries, CTX).map((step) => step.id),
+    steps.map((step) => step.id),
+    "the same source maps to the same ids"
+  );
+});
+
+test("codex log events map to typed steps and skip the started twin", () => {
+  const entries = parseJsonlTail(read("codex-log.jsonl"));
+  const steps = mapCodexSteps(entries, CTX);
+
+  assert.deepEqual(
+    steps.map((step) => `${step.type}/${step.status}`),
+    ["command/done", "command/error", "message/done", "edit/done"]
+  );
+  assert.deepEqual(steps[0].data, { command: "git status --short", output: "", exitCode: 0 });
+  assert.equal(steps[1].data.exitCode, 1);
+  assert.equal(steps[2].title, "Listo.");
+  assert.equal(steps[3].title, "editar apps\\web\\src\\a.tsx");
+  assert.equal(steps[3].path, "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\web-monitor\\apps\\web\\src\\a.tsx");
+});
+
+test("codex patch parsing splits add, update and delete hunks", () => {
+  const files = parseCodexPatch(
+    [
+      "*** Begin Patch",
+      "*** Add File: a.txt",
+      "+uno",
+      "+dos",
+      "*** Update File: b.txt",
+      "*** Move to: c.txt",
+      "@@ seccion",
+      " contexto",
+      "-viejo",
+      "+nuevo",
+      "*** Delete File: d.txt",
+      "*** End Patch"
+    ].join("\n")
+  );
+
+  assert.deepEqual(files.map((file) => `${file.kind} ${file.path}`), ["add a.txt", "update b.txt", "delete d.txt"]);
+  assert.equal(files[0].lines.join("\n"), "uno\ndos");
+  assert.deepEqual(files[1].hunks, [{ old: ["contexto", "viejo"], new: ["contexto", "nuevo"] }]);
+  assert.deepEqual(parseCodexPatch("no patch here"), []);
+});
+
+test("antigravity stream maps to full typed steps", () => {
+  const entries = parseJsonlTail(read("agy-steps.ndjson"));
+  const steps = mapAntigravitySteps(entries, CTX);
+
+  assert.deepEqual(
+    steps.map((step) => `${step.type}/${step.status}`),
+    [
+      "read/done",
+      "write/done",
+      "edit/done",
+      "edit/done",
+      "command/done",
+      "memory/done",
+      "tool/done",
+      "tool/done",
+      "command/error",
+      "message/done"
+    ]
+  );
+
+  const readStep = steps[0];
+  assert.equal(readStep.tool, "view_file");
+  assert.equal(readStep.path, "C:\\demo\\src\\app.mjs");
+  assert.equal(readStep.title, "leer C:\\demo\\src\\app.mjs");
+
+  const write = steps[1];
+  assert.equal(write.title, "escribir C:\\demo\\src\\nuevo.mjs");
+  assert.equal(write.data.content, "export const nuevo = true;\n");
+
+  assert.deepEqual(steps[2].data, { oldText: "const a = 1;", newText: "const a = 2;" });
+
+  const multi = steps[3];
+  assert.equal(multi.title, "editar C:\\demo\\src\\multi.mjs (2 cambios)");
+  assert.deepEqual(multi.data.edits, [
+    { oldText: "uno", newText: "dos" },
+    { oldText: "tres", newText: "cuatro" }
+  ]);
+
+  assert.deepEqual(steps[4].data, { command: "node --test", output: "pass 4\n", exitCode: 0 });
+
+  const memory = steps[5];
+  assert.equal(memory.tool, "mem_save");
+  assert.equal(memory.data.action, "save");
+  assert.equal(memory.data.memoryType, "architecture");
+  assert.equal(memory.data.content, "pasos tipados");
+  assert.equal(memory.data.results, "saved");
+
+  assert.equal(steps[6].tool, "fetch/get_url");
+  assert.equal(steps[6].data.server, "fetch");
+  assert.equal(steps[6].data.name, "get_url");
+
+  assert.equal(steps[7].title, "plan");
+
+  const failed = steps[8];
+  assert.equal(failed.status, "error");
+  assert.equal(failed.data.command, "git add .");
+  assert.equal(failed.data.output, "permiso denegado por el usuario");
+  assert.equal(failed.data.exitCode, null);
+
+  assert.equal(steps[9].data.text, "Listo, quedó todo andando.");
+  assert.equal(steps[9].title, "Listo, quedó todo andando.");
+
+  assert.deepEqual(
+    mapAntigravitySteps(entries, CTX).map((step) => step.id),
+    steps.map((step) => step.id),
+    "the same source maps to the same ids"
+  );
+});
+
+test("antigravity in-flight tools keep a running step", () => {
+  const entries = [
+    {
+      event: "step_update",
+      step_update: {
+        conversation_id: "conv-live",
+        step_index: 4,
+        state: "ACTIVE",
+        step_type: "tool",
+        tool_name: "run_command",
+        tool_info: { name: "run_command", parameters: { CommandLine: "pnpm build" } }
+      }
+    }
+  ];
+  const steps = mapAntigravitySteps(entries, CTX);
+  assert.deepEqual(steps.map((step) => `${step.type}/${step.status}`), ["command/running"]);
+  assert.equal(steps[0].data.command, "pnpm build");
+  assert.equal(steps[0].data.output, "");
+});
+
+test("the new step mappers cap text and keep the last 300 steps", () => {
+  const long = "y".repeat(200001);
+  const codex = mapCodexSteps(
+    [
+      {
+        type: "response_item",
+        payload: { type: "custom_tool_call", name: "apply_patch", call_id: "c1", status: "completed", input: `*** Begin Patch\n*** Add File: a.ts\n+${long}\n*** End Patch` }
+      }
+    ],
+    CTX
+  );
+  assert.equal(codex[0].data.content.length, 200000);
+  assert.equal(codex[0].truncated, true);
+
+  const agy = mapAntigravitySteps(
+    [
+      {
+        event: "step_update",
+        step_update: {
+          conversation_id: "c",
+          step_index: 1,
+          state: "DONE",
+          step_type: "tool",
+          tool_name: "write_to_file",
+          tool_info: { name: "write_to_file", parameters: { TargetFile: "a.ts", CodeContent: long } }
+        }
+      }
+    ],
+    CTX
+  );
+  assert.equal(agy[0].data.content.length, 200000);
+  assert.equal(agy[0].truncated, true);
+
+  const codexMany = mapCodexSteps(
+    Array.from({ length: 310 }, (_, index) => ({
+      type: "response_item",
+      payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `linea ${index}` }] }
+    })),
+    CTX
+  );
+  assert.equal(codexMany.length, 300);
+  assert.equal(codexMany[0].data.text, "linea 10");
+
+  const agyMany = mapAntigravitySteps(
+    Array.from({ length: 310 }, (_, index) => ({
+      event: "step_update",
+      step_update: {
+        conversation_id: "c",
+        step_index: index,
+        state: "DONE",
+        step_type: "tool",
+        tool_name: "view_file",
+        tool_info: { name: "view_file", parameters: { AbsolutePath: `C:/repo/f${index}.ts` } }
+      }
+    })),
+    CTX
+  );
+  assert.equal(agyMany.length, 300);
+  assert.equal(agyMany[0].path, "C:/repo/f10.ts");
+});
+
+test("codex steps() reads the kit log and degrades quietly", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-steps-"));
+  fs.writeFileSync(path.join(dir, "log-codex-a-2026.jsonl"), read("codex-steps.jsonl"));
+
+  const result = await codexSteps({ name: "codex-a" }, { ...CTX, kitDir: dir });
+  assert.ok(result.steps.length > 0);
+  assert.equal(result.notice, null);
+
+  const none = await codexSteps({ name: "codex-b" }, { ...CTX, kitDir: dir });
+  assert.deepEqual(none, { steps: [], notice: "todavía no hay log" });
+
+  const missing = await codexSteps({ name: "codex-a" }, { ...CTX, kitDir: path.join(dir, "nope") });
+  assert.deepEqual(missing, { steps: [], notice: "sin actividad visible" });
+
+  const malformed = path.join(dir, "log-codex-c-1.jsonl");
+  fs.writeFileSync(malformed, "not json\nstill not json\n");
+  const broken = await codexSteps({ name: "codex-c" }, { ...CTX, kitDir: dir });
+  assert.deepEqual(broken, { steps: [], notice: "sin pasos visibles" });
+});
+
+test("antigravity steps() reads the activityFile and degrades quietly", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agy-steps-"));
+  const file = path.join(dir, "agent.ndjson");
+  fs.writeFileSync(file, read("agy-steps.ndjson"));
+
+  const result = await agySteps({ name: "x", activityFile: file }, CTX);
+  assert.ok(result.steps.length > 0);
+  assert.equal(result.notice, null);
+
+  const none = await agySteps({ name: "x" }, CTX);
+  assert.deepEqual(none, { steps: [], notice: "sin actividad visible" });
+
+  const missing = await agySteps({ name: "x", activityFile: path.join(dir, "nope.ndjson") }, CTX);
+  assert.deepEqual(missing, { steps: [], notice: "sin actividad visible" });
+
+  const broken = path.join(dir, "broken.ndjson");
+  fs.writeFileSync(broken, "not json\nstill not json\n");
+  const malformed = await agySteps({ name: "x", activityFile: broken }, CTX);
+  assert.deepEqual(malformed, { steps: [], notice: "sin pasos visibles" });
 });
 
 test("both step mappers cap text, drop binary data and keep the last 300 steps", () => {
