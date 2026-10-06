@@ -31,6 +31,15 @@
     "estimateScript": "../autopilot/opencode-usage.mjs"
   },
   "repo": "../..",
+  "projects": [
+    {
+      "_comment": "Optional list of watched projects, each { id, name, repo, kitConfig }. Paths resolve like repo and workers.kitConfig (config folder, %VARS%, ~); name defaults to the repo folder. Without this key the top-level repo + workers.kitConfig stay the only implicit project (id 'default').",
+      "id": "korsakov",
+      "name": "Korsakov Orchestrator",
+      "repo": "../..",
+      "kitConfig": "../autopilot/kit.config.json"
+    }
+  ],
   "translate": {
     "_comment": "Spanish display layer: commit subjects and per-builder activity summaries are translated by a free OpenCode model through the shared server (helperExe and server come from kit.config.json). enabled false turns it off; summarySeconds is the minimum gap between summaries per builder. The cache is translations.json next to server.mjs (git-ignored).",
     "enabled": true,

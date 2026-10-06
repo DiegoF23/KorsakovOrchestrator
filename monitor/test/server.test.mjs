@@ -39,12 +39,15 @@ test("only loopback hosts are accepted for binding", () => {
 test("the router only answers the page, the read-only snapshot and the fonts", () => {
   assert.equal(routeRequest("GET", "/"), "index");
   assert.equal(routeRequest("GET", "/index.html"), "index");
+  assert.equal(routeRequest("GET", "/api/projects"), "projects");
+  assert.equal(routeRequest("HEAD", "/api/projects"), "projects");
   assert.equal(routeRequest("GET", "/api/state"), "state");
   assert.equal(routeRequest("HEAD", "/api/state"), "state");
   assert.equal(routeRequest("GET", "/fonts/share-tech-mono.woff2"), "font");
   assert.equal(routeRequest("HEAD", "/fonts/OFL.txt"), "font");
   assert.equal(routeRequest("GET", "/../secret"), null);
   assert.equal(routeRequest("GET", "/api"), null);
+  assert.equal(routeRequest("POST", "/api/projects"), null);
   assert.equal(routeRequest("POST", "/api/state"), null);
   assert.equal(routeRequest("POST", "/fonts/x.woff2"), null);
   assert.equal(routeRequest("DELETE", "/"), null);
@@ -146,4 +149,92 @@ test("a broken configuration keeps the last one and adds a notice", async () => 
   const snapshot = JSON.parse(broken.body);
   assert.equal(snapshot.notices.length, 1);
   assert.match(snapshot.notices[0], /No se pudo releer la configuración/);
+});
+
+test("/api/projects lists every project with the first id as default", async () => {
+  const file = tempConfig({
+    projects: [
+      { id: "korsakov", name: "Korsakov Orchestrator", repo: ".", kitConfig: "./k.json" },
+      { id: "web", name: "Web" }
+    ]
+  });
+  const handler = createRequestHandler({ __file: file }, { serverDir: path.dirname(file), configPath: file });
+
+  const response = mockResponse();
+  await handler({ method: "GET", url: "/api/projects" }, response);
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /application\/json/);
+  assert.deepEqual(JSON.parse(response.body), {
+    projects: [
+      { id: "korsakov", name: "Korsakov Orchestrator" },
+      { id: "web", name: "Web" }
+    ],
+    defaultId: "korsakov"
+  });
+});
+
+test("/api/projects falls back to the implicit default project", async () => {
+  const file = tempConfig({ repo: "." });
+  const handler = createRequestHandler({ __file: file }, { serverDir: path.dirname(file), configPath: file });
+
+  const response = mockResponse();
+  await handler({ method: "GET", url: "/api/projects" }, response);
+
+  const body = JSON.parse(response.body);
+  assert.equal(body.projects.length, 1);
+  assert.equal(body.projects[0].id, "default");
+  assert.equal(body.defaultId, "default");
+});
+
+test("/api/state?project=<id> builds the snapshot of the chosen project", async () => {
+  const file = tempConfig({
+    projects: [
+      { id: "one", name: "One", repo: "." },
+      { id: "two", name: "Two", repo: "." }
+    ]
+  });
+  const seen = [];
+  const handler = createRequestHandler({ __file: file }, {
+    serverDir: path.dirname(file),
+    configPath: file,
+    buildSnapshot: async (config, options) => {
+      seen.push(options.project.id);
+      return { notices: [], project: { id: options.project.id, name: options.project.name } };
+    }
+  });
+
+  const response = mockResponse();
+  await handler({ method: "GET", url: "/api/state?project=two" }, response);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(seen, ["two"]);
+  assert.deepEqual(JSON.parse(response.body).project, { id: "two", name: "Two" });
+});
+
+test("the state falls back to the first project and rejects an unknown id with 404", async () => {
+  const file = tempConfig({
+    projects: [
+      { id: "one", name: "One", repo: "." },
+      { id: "two", name: "Two", repo: "." }
+    ]
+  });
+  const seen = [];
+  const handler = createRequestHandler({ __file: file }, {
+    serverDir: path.dirname(file),
+    configPath: file,
+    buildSnapshot: async (config, options) => {
+      seen.push(options.project.id);
+      return { notices: [] };
+    }
+  });
+
+  await handler({ method: "GET", url: "/api/state" }, mockResponse());
+  assert.deepEqual(seen, ["one"]);
+
+  const unknown = mockResponse();
+  await handler({ method: "GET", url: "/api/state?project=nope" }, unknown);
+  assert.equal(unknown.status, 404);
+  assert.deepEqual(JSON.parse(unknown.body), { error: "unknown project" });
+  assert.deepEqual(seen, ["one"], "an unknown project never builds a snapshot");
 });

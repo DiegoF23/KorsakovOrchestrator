@@ -76,6 +76,19 @@ test("the top bar names the orchestrator and shows its model and effort", () => 
   assert.match(html, /orchestrator\.text/);
 });
 
+test("the header project selector travels in the URL, localStorage and every poll", () => {
+  assert.match(html, /<select id="project-select"/);
+  assert.match(html, /\.project-picker select\s*\{[^}]*max-width:\s*220px/);
+  assert.match(html, /urlProject\(\) \|\| storedProject\(\)/);
+  assert.match(html, /known \? remembered : defaultProjectId/);
+  assert.match(html, /try \{[\s\S]{0,120}localStorage\.getItem\(PROJECT_STORAGE_KEY[\s\S]{0,120}\} catch/);
+  assert.match(html, /try \{[\s\S]{0,200}localStorage\.setItem\(PROJECT_STORAGE_KEY[\s\S]{0,200}\} catch/);
+  assert.match(html, /window\.history\.replaceState/);
+  assert.match(html, /"\/api\/state" \+ query/);
+  assert.match(html, /response\.status === 404 && projectId/);
+  assert.match(html, /fetch\("\/api\/projects"/);
+});
+
 test("every usage meter keeps its own row with bars, reset and age", () => {
   assert.match(html, /\.usage\s*\{[^}]*display:\s*grid/);
   assert.match(html, /\.usage-row\s*\{[^}]*white-space:\s*nowrap/);

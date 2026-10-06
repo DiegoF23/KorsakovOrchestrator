@@ -11,7 +11,7 @@ import http from "node:http";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { buildSnapshot, loadConfig } from "./lib/state.mjs";
+import { buildSnapshot, loadConfig, resolveProjects } from "./lib/state.mjs";
 
 const DEFAULT_CONFIG = "fleet-monitor.config.json";
 const STATIC_TYPES = {
@@ -26,6 +26,7 @@ export function isLoopback(host) {
 export function routeRequest(method, pathname) {
   if (method !== "GET" && method !== "HEAD") return null;
   if (pathname === "/" || pathname === "/index.html") return "index";
+  if (pathname === "/api/projects") return "projects";
   if (pathname === "/api/state") return "state";
   if (pathname.startsWith("/fonts/")) return "font";
   return null;
@@ -65,12 +66,13 @@ export function createRequestHandler(config, options = {}) {
   const build = options.buildSnapshot ?? buildSnapshot;
 
   return async function handleRequest(request, response) {
-    let pathname = "/";
+    let url;
     try {
-      pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+      url = new URL(request.url ?? "/", "http://127.0.0.1");
     } catch {
-      pathname = "/";
+      url = new URL("/", "http://127.0.0.1");
     }
+    const pathname = url.pathname;
     const route = routeRequest(request.method, pathname);
 
     if (route === "index") {
@@ -110,10 +112,35 @@ export function createRequestHandler(config, options = {}) {
       return;
     }
 
+    if (route === "projects") {
+      const reloaded = readRequestConfig(configPath, config);
+      const projects = resolveProjects(reloaded.config);
+      const body = JSON.stringify({
+        projects: projects.map(({ id, name }) => ({ id, name })),
+        defaultId: projects[0]?.id ?? null
+      });
+      response.writeHead(200, {
+        "Content-Type": "application/json; charset=utf-8",
+        "Cache-Control": "no-store"
+      });
+      response.end(request.method === "HEAD" ? undefined : body);
+      return;
+    }
+
     if (route === "state") {
       try {
         const reloaded = readRequestConfig(configPath, config);
-        const snapshot = await build(reloaded.config, { now: now() });
+        const projects = resolveProjects(reloaded.config);
+        // Without the parameter the first project wins, exactly like a config
+        // without `projects` keeps its single default one.
+        const requested = url.searchParams.get("project");
+        const project = requested ? projects.find((item) => item.id === requested) : projects[0];
+        if (!project) {
+          response.writeHead(404, { "Content-Type": "application/json; charset=utf-8" });
+          response.end(request.method === "HEAD" ? undefined : JSON.stringify({ error: "unknown project" }));
+          return;
+        }
+        const snapshot = await build(reloaded.config, { now: now(), project });
         if (reloaded.error) {
           snapshot.notices = [
             ...(Array.isArray(snapshot.notices) ? snapshot.notices : []),
