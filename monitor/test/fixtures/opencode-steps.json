@@ -1,0 +1,134 @@
+[
+  {
+    "info": { "id": "s1", "role": "assistant", "time": { "created": 1759485600000, "completed": 1759485601000 } },
+    "parts": [
+      {
+        "id": "t1",
+        "type": "tool",
+        "tool": "write",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\web-monitor\\apps\\web\\src\\a.tsx",
+            "content": "export const a = 1;\n"
+          },
+          "output": "ok"
+        }
+      },
+      {
+        "id": "t2",
+        "type": "tool",
+        "tool": "edit",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo\\apps\\api\\src\\x.ts",
+            "oldString": "const a = 1",
+            "newString": "const a = 2"
+          }
+        }
+      },
+      {
+        "id": "t3",
+        "type": "tool",
+        "tool": "read",
+        "state": {
+          "status": "completed",
+          "input": { "filePath": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo\\apps\\api\\src\\x.ts" }
+        }
+      },
+      {
+        "id": "t4",
+        "type": "tool",
+        "tool": "grep",
+        "state": {
+          "status": "completed",
+          "input": {
+            "pattern": "TODO",
+            "path": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo\\apps"
+          },
+          "output": "3 matches"
+        }
+      },
+      {
+        "id": "t5",
+        "type": "tool",
+        "tool": "bash",
+        "state": {
+          "status": "completed",
+          "input": { "command": "node --test" },
+          "output": "pass 12\n",
+          "metadata": { "exit": 0 }
+        }
+      },
+      {
+        "id": "t6",
+        "type": "tool",
+        "tool": "engram_mem_save",
+        "state": {
+          "status": "completed",
+          "input": { "title": "Steps API", "type": "architecture", "content": "se guardan pasos tipados" },
+          "output": "saved"
+        }
+      },
+      {
+        "id": "t7",
+        "type": "tool",
+        "tool": "mcp__plugin_engram_engram__mem_search",
+        "state": {
+          "status": "completed",
+          "input": { "query": "typed steps" },
+          "output": "[{\"id\":1}]"
+        }
+      },
+      {
+        "id": "t8",
+        "type": "tool",
+        "tool": "task",
+        "state": {
+          "status": "completed",
+          "input": { "description": "explore the repo" },
+          "output": "done"
+        }
+      },
+      {
+        "id": "t9",
+        "type": "text",
+        "text": "Listo, corregi el formulario. Sigo con las pruebas."
+      },
+      {
+        "id": "t10",
+        "type": "tool",
+        "tool": "write",
+        "state": {
+          "status": "running",
+          "input": { "filePath": "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo\\apps\\web\\src\\b.tsx" }
+        }
+      }
+    ]
+  },
+  {
+    "info": { "id": "s2", "role": "assistant", "time": { "created": 1759485602000, "completed": 1759485603000 } },
+    "parts": [
+      {
+        "id": "t11",
+        "type": "tool",
+        "tool": "bash",
+        "state": {
+          "status": "error",
+          "input": { "command": "pnpm test" },
+          "output": "boom in the test run"
+        }
+      },
+      {
+        "id": "t12",
+        "type": "tool",
+        "tool": "webfetch",
+        "state": {
+          "status": "running",
+          "input": { "url": "https://example.com" }
+        }
+      }
+    ]
+  }
+]

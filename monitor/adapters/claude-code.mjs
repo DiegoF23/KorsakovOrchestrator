@@ -8,6 +8,7 @@
 import fs from "node:fs";
 
 import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { capStep, commandStep, lastSteps, memoryAction, memoryStep, numberOrNull, toolTitle } from "../lib/steps.mjs";
 
 export const id = "claude";
 export const label = "Claude";
@@ -196,6 +197,165 @@ export function mapClaudeEntries(entries, ctx = {}) {
   return events;
 }
 
+// Full, typed steps for the live view: every tool_use keeps its complete input
+// and the matching tool_result its output (joined by tool_use_id). Pure;
+// exported for tests. A tool_use without a result is still running.
+export function mapClaudeSteps(entries, ctx = {}) {
+  const results = new Map();
+  for (const entry of entries ?? []) {
+    const content = entry?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part?.type === "tool_result") {
+        results.set(String(part.tool_use_id ?? ""), { part, toolUseResult: entry.toolUseResult ?? null });
+      }
+    }
+  }
+
+  const steps = [];
+  let index = 0;
+  for (const entry of entries ?? []) {
+    const message = entry?.message;
+    if (!message || typeof message !== "object") continue;
+    const time = entryTime(entry.timestamp);
+    const assistant = entry.type === "assistant" || message.role === "assistant";
+    const content = message.content;
+    if (typeof content === "string") {
+      index += 1;
+      if (assistant && content.trim()) steps.push(claudeTextStep(entry, index, time, content));
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      index += 1;
+      if (!part || typeof part !== "object") continue;
+      if (part.type === "text") {
+        if (assistant && part.text) steps.push(claudeTextStep(entry, index, time, part.text));
+      } else if (part.type === "tool_use") {
+        steps.push(claudeToolStep(part, results.get(String(part.id ?? "")) ?? null, time, index, ctx));
+      }
+    }
+  }
+  return lastSteps(steps);
+}
+
+function claudeTextStep(entry, index, time, text) {
+  return capStep({
+    id: `text-${entry.uuid ?? entry.timestamp ?? "entry"}-${index}`,
+    time,
+    type: "message",
+    tool: "text",
+    status: "done",
+    title: firstSentence(text),
+    data: { text }
+  });
+}
+
+function claudeToolStep(part, result, time, index, ctx) {
+  const tool = String(part.name ?? "");
+  const input = part.input && typeof part.input === "object" ? part.input : {};
+  const id = part.id ? String(part.id) : `${tool}-${index}`;
+  const status = !result ? "running" : result.part.is_error ? "error" : "done";
+  const output = result ? toolResultText(result.part) : "";
+  if (memoryAction(tool)) {
+    return memoryStep({ id, time, tool, status, input, output: output || null });
+  }
+
+  const name = tool.toLowerCase();
+  const ref = input.file_path ?? input.filePath ?? input.path ?? null;
+  const path = ref !== null && ref !== undefined && ref !== "" ? String(ref) : null;
+  const label = shortText(shortPath(String(ref ?? ""), ctx.repo, ctx.worktreeParent), 120);
+
+  if (name === "write") {
+    return capStep({
+      id,
+      time,
+      type: "write",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: `escribir ${label}`,
+      data: { content: input.content ?? "" }
+    });
+  }
+  if (name === "edit") {
+    return capStep({
+      id,
+      time,
+      type: "edit",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: `editar ${label}`,
+      data: { oldText: input.old_string ?? "", newText: input.new_string ?? "" }
+    });
+  }
+  if (name === "multiedit") {
+    const edits = Array.isArray(input.edits)
+      ? input.edits.map((edit) => ({ oldText: edit?.old_string ?? "", newText: edit?.new_string ?? "" }))
+      : [];
+    return capStep({
+      id,
+      time,
+      type: "edit",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: `editar ${label} (${edits.length} cambios)`,
+      data: { edits }
+    });
+  }
+  if (name === "read" || name === "grep" || name === "glob") {
+    const pattern = input.pattern ? String(input.pattern) : "";
+    return capStep({
+      id,
+      time,
+      type: "read",
+      tool,
+      status,
+      ...(path ? { path } : {}),
+      title: pattern ? `buscar «${shortText(pattern, 100)}»${label ? ` en ${label}` : ""}` : `leer ${label}`,
+      data: {}
+    });
+  }
+  if (name === "bash" || name === "powershell") {
+    return commandStep({
+      id,
+      time,
+      tool,
+      status,
+      command: input.command ?? "",
+      output: result ? claudeCommandOutput(result) : "",
+      exitCode: result ? claudeExitCode(result) : null
+    });
+  }
+  return capStep({
+    id,
+    time,
+    type: "tool",
+    tool,
+    status,
+    title: toolTitle(tool, input),
+    data: { name: tool, params: input, result: result ? output || result.toolUseResult || null : null }
+  });
+}
+
+function claudeCommandOutput(result) {
+  const text = toolResultText(result.part);
+  if (text) return text;
+  const extra = result.toolUseResult;
+  return extra ? [extra.stdout, extra.stderr].filter(Boolean).join("\n") : "";
+}
+
+// Real transcripts carry the exit code on the entry's toolUseResult; older
+// ones only leave it inside the result text ("Exit code 1").
+function claudeExitCode(result) {
+  const direct = numberOrNull(result.toolUseResult?.exitCode);
+  if (direct !== null) return direct;
+  const match = /exit code[:\s]+(-?\d+)/i.exec(toolResultText(result.part));
+  return match ? Number(match[1]) : null;
+}
+
 export async function activity(worker, ctx = {}) {
   const file = worker?.activityFile;
   if (!file) return { events: [], notice: "sin actividad visible" };
@@ -204,6 +364,18 @@ export async function activity(worker, ctx = {}) {
     return { events, notice: events.length ? null : "sin actividad visible" };
   } catch {
     return { events: [], notice: "sin actividad visible" };
+  }
+}
+
+// The same transcript tail feeds the typed steps of the live view.
+export async function steps(worker, ctx = {}) {
+  const file = worker?.activityFile;
+  if (!file) return { steps: [], notice: "sin actividad visible" };
+  try {
+    const mapped = mapClaudeSteps(parseJsonlTail(readFileTail(file)), ctx);
+    return { steps: mapped, notice: mapped.length ? null : "sin pasos visibles" };
+  } catch {
+    return { steps: [], notice: "sin actividad visible" };
   }
 }
 
