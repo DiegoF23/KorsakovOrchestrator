@@ -29,7 +29,8 @@ se fuerza de vuelta a loopback), sirve `GET /` con la página y
 `GET /api/state` con una foto JSON. No escribe nada, no mata ni lanza procesos:
 solo lee archivos y ejecuta `git` y consultas de sistema de solo lectura. La
 única excepción es la capa de traducción (ver más abajo): guarda su caché en
-`translations.json` y llama al helper en segundo plano.
+`translations.json` y llama al helper en segundo plano, y la acción explícita
+"abrir en el Explorador" (ver "Archivos de los agentes").
 
 ## Qué muestra
 
@@ -210,7 +211,35 @@ animación.
   solo produce segmentos con un índice de color 0–15 que el visor pinta con
   `var(--ansi-N)`.
 
-## Traducciones y resúmenes
+## Archivos de los agentes
+
+Cuatro rutas dejan que la página muestre lo que produjo un agente. Todas parten
+de un par `project` + `worker` y solo sirven dentro de la carpeta de trabajo
+(`workdir`) de esa pista; el guardia de `Host`/`Origin` va primero en todas.
+
+- `GET /api/file?project&worker&path` entrega los bytes. `path` es absoluto o
+  relativo al `workdir`. La ruta real (`fs.realpathSync`, sigue enlaces y
+  junctions) debe quedar dentro del `workdir` real, sin distinguir mayúsculas en
+  Windows y con separador final (`C:\a\b` no admite `C:\a\bc`); si no, 403. Las
+  rutas UNC, `\\?\`, con `:` (flujos NTFS) o relativas a unidad se rechazan antes
+  de tocar el disco. Solo salen estas extensiones, con tipo fijo: `png jpg jpeg
+  gif webp bmp ico svg mp4 webm mov mp3 wav ogg pdf` (otra → 415). Lleva
+  `nosniff`, `no-store`, `Content-Disposition: inline` y una CSP con `sandbox`
+  para que un SVG o PDF abierto solo nunca ejecute script en el origen del
+  monitor. Admite un rango (`206`, `416` si es inválido), tope de 512 MB (413) y
+  se envía en streaming. Directorio → 400, inexistente → 404.
+- `GET /api/file-info?project&worker&path` devuelve `{ name, path, size,
+  modified, kind }` (`image | video | audio | pdf | other`) para cualquier
+  extensión, sin contenido.
+- `GET /api/tree?project&worker` devuelve `{ root, files, truncated }` con
+  `git ls-files --cached --others --exclude-standard` (sin shell, 5 s) o, fuera
+  de un repo, un recorrido que omite `node_modules`, carpetas con punto y
+  enlaces. Tope de 5.000 entradas y caché de 10 s por proyecto y pista.
+- `POST /api/open-in-explorer` con `{ project, worker, path }` abre Explorer con
+  el archivo seleccionado (o la carpeta). Exige `Content-Type: application/json`
+  (415), un `Origin` del propio monitor (403 si falta), cuerpo de hasta 4 KB y
+  la misma contención. Lanza `explorer.exe` con un arreglo de argumentos, sin
+  shell. Fuera de Windows responde 501.
 
 Los commits en git siguen en inglés; el panel traduce **solo la vista** con un
 modelo gratuito de OpenCode, el mismo helper que usa el tablero de terminal
