@@ -1,9 +1,12 @@
 ﻿# Starts the fleet-monitor server hidden if it is not running yet and opens the
 # browser. Idempotent: running it again only reopens the page.
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 [-ConfigPath <ruta>] [-Port 4200]
+# The server is created through WMI so it is detached from the calling shell:
+# it keeps running when the terminal or the agent session that started it ends.
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 [-ConfigPath <ruta>] [-Port 4200] [-NoBrowser]
 param(
   [string]$ConfigPath = '',
-  [int]$Port = 0
+  [int]$Port = 0,
+  [switch]$NoBrowser
 )
 
 $ErrorActionPreference = 'Stop'
@@ -50,9 +53,18 @@ if ($effectivePort -le 0) {
 if (Test-MonitorPort $effectivePort) {
   Write-Host "El monitor ya está corriendo en http://127.0.0.1:$effectivePort/."
 } else {
-  $serverArgs = @("`"$server`"")
-  if ($ConfigPath) { $serverArgs += "`"$ConfigPath`"" }
-  Start-Process -FilePath $node.Source -ArgumentList $serverArgs -WorkingDirectory $dir -WindowStyle Hidden | Out-Null
+  $commandLine = "`"$($node.Source)`" `"$server`""
+  if ($ConfigPath) { $commandLine += " `"$ConfigPath`"" }
+  $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
+  $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
+    CommandLine = $commandLine
+    CurrentDirectory = $dir
+    ProcessStartupInformation = $startup
+  }
+  if ($created.ReturnValue -ne 0) {
+    Write-Host "No se pudo iniciar el servidor (código WMI $($created.ReturnValue))." -ForegroundColor Red
+    exit 1
+  }
   $ready = $false
   for ($i = 0; $i -lt 20; $i++) {
     Start-Sleep -Milliseconds 500
@@ -68,4 +80,4 @@ if (Test-MonitorPort $effectivePort) {
   }
 }
 
-Start-Process "http://127.0.0.1:$effectivePort/"
+if (-not $NoBrowser) { Start-Process "http://127.0.0.1:$effectivePort/" }

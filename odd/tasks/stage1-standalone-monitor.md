@@ -50,3 +50,5 @@ The monitor lives inside the FlotaGrupo repo and is wired to its autopilot kit. 
 ## Next step
 
 Wait for T2, review its diff, run `node --test`, then merge into `main` with the user's OK and restart the monitor.
+
+- Fix: the monitor died when the agent shell that started it ended (`Start-Process` child is cleaned up with the caller). `monitor/start.ps1` now creates the server through WMI (`Win32_Process.Create`, parent `WmiPrvSE`) and accepts `-NoBrowser`. Start with: `monitor/start.ps1 -ConfigPath .korsakov/monitor.config.json -NoBrowser`.
