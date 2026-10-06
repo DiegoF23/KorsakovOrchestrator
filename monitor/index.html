@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; font-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; font-src 'self'">
 <title>Monitor</title>
 <script>
   // Apply the stored theme before the stylesheet renders so the first paint is
@@ -584,6 +584,159 @@
   }
   .commit.is-new { animation: commit-in 260ms ease-out both; }
   .node.is-new { animation: node-flash 900ms ease-out both; }
+  /* Live viewer: replays the typed agent steps under a worker card. The panel
+     keeps one visible content area and swaps the per-tab content node, so a
+     poll never restarts an animation. Every colour comes from a token. */
+  .live-toggle {
+    flex: 0 0 auto;
+    background: var(--panel);
+    color: var(--live);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 5px;
+    font-family: var(--font-display);
+    font-size: 10.5px;
+    line-height: 1.5;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+  .live-toggle:hover { border-color: var(--live); }
+  .live-toggle[aria-expanded="true"] { color: var(--work); }
+  .live-viewer {
+    margin-top: 4px;
+    padding-top: 3px;
+    border-top: 1px dashed var(--border);
+    min-width: 0;
+  }
+  .live-viewer[hidden] { display: none; }
+  .live-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+  }
+  .live-tab-box { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px; min-width: 0; }
+  .live-tab,
+  .live-follow,
+  .live-skip,
+  .live-collapse {
+    background: var(--panel);
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0 5px;
+    font-family: var(--font-display);
+    font-size: 10px;
+    line-height: 1.6;
+    letter-spacing: 0.5px;
+    cursor: pointer;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .live-tab:hover,
+  .live-follow:hover,
+  .live-skip:hover,
+  .live-collapse:hover { border-color: var(--live); }
+  .live-tab.status-running { color: var(--work); }
+  .live-tab.status-done { color: var(--live); }
+  .live-tab.status-error { color: var(--err); }
+  .live-tab.active { border-color: currentColor; box-shadow: 0 0 4px rgba(var(--live-rgb), 0.25); }
+  .live-follow { color: var(--text); }
+  .live-follow.follow-on { color: var(--live); border-color: var(--live); }
+  .live-skip { color: var(--warn); }
+  .live-collapse { color: var(--live); min-width: 18px; text-align: center; }
+  .live-body {
+    margin-top: 3px;
+    max-height: 200px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
+  }
+  .live-body::-webkit-scrollbar { width: 8px; }
+  .live-body::-webkit-scrollbar-track { background: transparent; }
+  .live-body::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+  .live-viewer.collapsed .live-body { display: none; }
+  .live-tab-content { display: grid; gap: 3px; min-width: 0; }
+  .live-step { display: grid; gap: 2px; min-width: 0; }
+  .live-label {
+    color: var(--dim);
+    font-family: var(--font-display);
+    font-size: 9.5px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .live-pre {
+    margin: 0;
+    padding: 2px 5px;
+    background: var(--code-bg);
+    color: var(--code-text);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    font-family: var(--font);
+    font-size: 10.5px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 150px;
+    overflow: auto;
+  }
+  .live-pre.removed {
+    background: var(--code-removed-bg);
+    color: var(--err);
+    text-decoration: line-through;
+  }
+  .live-pre.added { background: var(--code-added-bg); }
+  .live-pre.live-text { background: var(--panel); color: var(--text); }
+  .live-sheet { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px; align-items: start; min-width: 0; }
+  .live-gutter {
+    margin: 0;
+    padding: 2px 0;
+    color: var(--dim);
+    font-family: var(--font);
+    font-size: 10.5px;
+    line-height: 1.35;
+    text-align: right;
+    user-select: none;
+    min-width: 18px;
+  }
+  .tok-comment { color: var(--code-comment); }
+  .tok-string { color: var(--code-string); }
+  .tok-number { color: var(--code-number); }
+  .tok-keyword { color: var(--code-keyword); }
+  .tok-function { color: var(--code-function); }
+  .live-typing {
+    color: var(--work);
+    font-size: 10.5px;
+    animation: live-typing 1s steps(2, jump-none) infinite;
+  }
+  @keyframes live-typing { 0% { opacity: 1; } 100% { opacity: 0.25; } }
+  .live-notice { color: var(--warn); font-size: 10px; }
+  .live-scan-line { color: var(--text); font-size: 10.5px; overflow-wrap: anywhere; }
+  .live-scan-note { color: var(--dim); font-size: 10px; }
+  .live-scan {
+    position: relative;
+    height: 2px;
+    margin: 2px 0;
+    background: var(--scanline);
+    overflow: hidden;
+  }
+  .live-scan::after {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 30%;
+    background: var(--live);
+    opacity: 0.5;
+    animation: live-scan 1.6s linear infinite;
+  }
+  @keyframes live-scan {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(340%); }
+  }
   :focus-visible { outline: 2px solid var(--live); outline-offset: 2px; }
   @media (prefers-reduced-motion: reduce) {
     #rain { display: none; }
@@ -997,6 +1150,9 @@
     } else {
       card.appendChild(el("p", "empty", (worker.activity && worker.activity.notice) || "sin actividad visible"));
     }
+    // The live viewer lives in its own module; it re-attaches its panel to the
+    // fresh card on every refresh, so an open replay survives the 5 s poll.
+    if (window.FleetLiveView) window.FleetLiveView.attach(card, worker, projectId);
     return card;
   }
 
@@ -1430,5 +1586,6 @@
   loadProjects();
 })();
 </script>
+<script type="module" src="/js/live-view.mjs"></script>
 </body>
 </html>

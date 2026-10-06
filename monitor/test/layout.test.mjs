@@ -195,6 +195,17 @@ test("every inline script block parses", () => {
   });
 });
 
+test("the live viewer loads as a module and its colours come from the theme tokens", () => {
+  assert.match(html, /<script type="module" src="\/js\/live-view\.mjs"><\/script>/);
+  assert.match(html, /script-src 'self' 'unsafe-inline'/);
+  assert.match(html, /FleetLiveView\.attach\(card, worker, projectId\)/);
+  assert.match(html, /\.live-tab\.status-running\s*\{[^}]*var\(--work\)/);
+  assert.match(html, /\.live-tab\.status-done\s*\{[^}]*var\(--live\)/);
+  assert.match(html, /\.live-tab\.status-error\s*\{[^}]*var\(--err\)/);
+  assert.match(html, /\.live-pre\s*\{[^}]*background:\s*var\(--code-bg\)/);
+  assert.match(html, /\.live-viewer\.collapsed \.live-body\s*\{[^}]*display:\s*none/);
+});
+
 function styleCss() {
   const block = html.match(/<style>([\s\S]*?)<\/style>/);
   assert.ok(block, "the page keeps its CSS in one style block");
