@@ -40,8 +40,9 @@
      anything used from JavaScript is read back from these computed tokens. */
   :root {
     --bg: #000;
-    --card: #030d05;
-    --panel: #020a04;
+    --card: rgba(3, 13, 5, 0.7);
+    --panel: rgba(2, 10, 4, 0.66);
+    --rain-opacity: 0.28;
     --live: #00ff41;
     --live-rgb: 0, 255, 65;
     --text: #35e05f;
@@ -87,7 +88,7 @@
     --branch-6: #5fe8e8;
     --branch-7: #c792ea;
     --branch-neutral: #00a333;
-    --code-bg: #020a04;
+    --code-bg: rgba(2, 10, 4, 0.78);
     --code-text: #c9f5d4;
     --code-keyword: #00ff41;
     --code-string: #ffb000;
@@ -117,8 +118,9 @@
   }
   :root[data-theme="matrix"] {
     --bg: #000;
-    --card: #030d05;
-    --panel: #020a04;
+    --card: rgba(3, 13, 5, 0.7);
+    --panel: rgba(2, 10, 4, 0.66);
+    --rain-opacity: 0.28;
     --live: #00ff41;
     --live-rgb: 0, 255, 65;
     --text: #35e05f;
@@ -164,7 +166,7 @@
     --branch-6: #5fe8e8;
     --branch-7: #c792ea;
     --branch-neutral: #00a333;
-    --code-bg: #020a04;
+    --code-bg: rgba(2, 10, 4, 0.78);
     --code-text: #c9f5d4;
     --code-keyword: #00ff41;
     --code-string: #ffb000;
@@ -213,7 +215,7 @@
     position: fixed;
     inset: 0;
     z-index: 0;
-    opacity: 0.10;
+    opacity: var(--rain-opacity);
     pointer-events: none;
   }
   .app {
