@@ -328,3 +328,15 @@ test("recent Claude Code sessions of the project become orchestrator cards", asy
   assert.equal(withOrchestratorTracks(kit, { repo }, { orchestratorSessions: false }, now, { home }), kit);
   assert.equal(withOrchestratorTracks(kit, { repo: path.join(home, "nope") }, {}, now, { home }), kit);
 });
+test("an orchestrator card names the model and effort the session really uses", async () => {
+  const { transcriptModel } = await import("../lib/state.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-model-"));
+  const file = path.join(dir, "s.jsonl");
+  fs.writeFileSync(file, [
+    JSON.stringify({ type: "assistant", message: { model: "claude-sonnet-5-5" } }),
+    JSON.stringify({ type: "system", effort: "medium" }),
+    JSON.stringify({ type: "assistant", message: { model: "claude-opus-5-5" } })
+  ].join("\n"));
+  assert.deepEqual(transcriptModel(file), { model: "claude-opus-5-5", effort: "medium" });
+  assert.deepEqual(transcriptModel(path.join(dir, "missing.jsonl")), { model: null, effort: null });
+});

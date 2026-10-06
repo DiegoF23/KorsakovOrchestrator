@@ -274,6 +274,36 @@ export function recentClaudeSessions(dir, now = new Date(), options = {}) {
   return sessions.slice(0, options.max ?? ORCHESTRATOR_MAX_SESSIONS);
 }
 
+// The model and effort a session really runs with, read from the end of its
+// transcript (assistant entries carry "model"; settings entries "effort").
+// Null fields when the tail does not say; the card then falls back to config.
+export function transcriptModel(file, maxBytes = 262144) {
+  let text = "";
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, maxBytes);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      text = buffer.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return { model: null, effort: null };
+  }
+  const last = (regex) => {
+    let found = null;
+    for (const match of text.matchAll(regex)) found = match[1];
+    return found;
+  };
+  return {
+    model: last(/"model":"(claude-[^"]+)"/g),
+    effort: last(/"effort":"([a-z]+)"/g)
+  };
+}
+
 // Returns a copy of the kit with one synthetic track per recent Claude Code
 // session of the project in front of the kit's own tracks. The kit file is
 // never written. `config.orchestratorSessions === false` turns it off.
@@ -283,6 +313,7 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
   if (!sessions.length) return kit;
   const tracks = sessions.map((session) => {
     const working = now.getTime() - session.mtimeMs <= ORCHESTRATOR_WORKING_MS;
+    const real = transcriptModel(session.file);
     return {
       name: `${ORCHESTRATOR_TRACK_PREFIX}${session.id.slice(0, 8)}`,
       engine: "claude-code",
@@ -291,8 +322,8 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       workdir: project.repo,
       activityFile: session.file,
       branch: "main",
-      model: config?.orchestrator?.model,
-      effort: config?.orchestrator?.effort,
+      model: real.model ?? config?.orchestrator?.model,
+      effort: real.effort ?? config?.orchestrator?.effort,
       __state: working ? "working" : "waiting",
       __statusTime: new Date(session.mtimeMs).toISOString()
     };
