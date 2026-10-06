@@ -151,6 +151,7 @@ export async function buildSnapshot(config, options = {}) {
     notices.push("No hay una configuración de kit declarada.");
   }
 
+  kit = withOrchestratorTracks(kit, project, config, now);
   const repo =
     project.repo ??
     (kit?.repo ? path.resolve(kitDir ?? baseDir, expandVars(String(kit.repo))) : null);
@@ -228,6 +229,75 @@ async function usageSnapshot(ctx) {
     for (const row of rows) row.ageText = formatUsageAge(row.ageMinutes);
     return rows;
   }, []);
+}
+
+// -- Claude Code orchestrator sessions ---------------------------------------
+// Claude Code keeps one JSONL transcript per session in
+// ~/.claude/projects/<repo path with every non-alphanumeric char as "-">/.
+// Each session touched recently becomes a synthetic claude-code track, so the
+// board (and the live viewer) shows the orchestrator working on the project
+// without any kit entry. A transcript is "working" while it keeps growing and
+// "waiting" while the session sits idle; older sessions are left out.
+export const ORCHESTRATOR_TRACK_PREFIX = "claude-";
+const ORCHESTRATOR_WORKING_MS = 3 * 60000;
+const ORCHESTRATOR_RECENT_MS = 60 * 60000;
+const ORCHESTRATOR_MAX_SESSIONS = 3;
+
+export function claudeProjectDir(repo, home = os.homedir()) {
+  if (!repo) return null;
+  return path.join(home, ".claude", "projects", path.resolve(String(repo)).replace(/[^A-Za-z0-9]/g, "-"));
+}
+
+export function recentClaudeSessions(dir, now = new Date(), options = {}) {
+  if (!dir) return [];
+  const recentMs = options.recentMs ?? ORCHESTRATOR_RECENT_MS;
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const sessions = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+    const file = path.join(dir, entry.name);
+    let mtimeMs;
+    try {
+      mtimeMs = fs.statSync(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (now.getTime() - mtimeMs > recentMs) continue;
+    sessions.push({ id: entry.name.slice(0, -".jsonl".length), file, mtimeMs });
+  }
+  sessions.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return sessions.slice(0, options.max ?? ORCHESTRATOR_MAX_SESSIONS);
+}
+
+// Returns a copy of the kit with one synthetic track per recent Claude Code
+// session of the project in front of the kit's own tracks. The kit file is
+// never written. `config.orchestratorSessions === false` turns it off.
+export function withOrchestratorTracks(kit, project, config = {}, now = new Date(), options = {}) {
+  if (config?.orchestratorSessions === false || !project?.repo) return kit;
+  const sessions = recentClaudeSessions(claudeProjectDir(project.repo, options.home), now, options);
+  if (!sessions.length) return kit;
+  const tracks = sessions.map((session) => {
+    const working = now.getTime() - session.mtimeMs <= ORCHESTRATOR_WORKING_MS;
+    return {
+      name: `${ORCHESTRATOR_TRACK_PREFIX}${session.id.slice(0, 8)}`,
+      engine: "claude-code",
+      title: `Orquestador Claude Code · sesión ${session.id.slice(0, 8)}`,
+      label: "Orquestador Claude Code",
+      workdir: project.repo,
+      activityFile: session.file,
+      branch: "main",
+      model: config?.orchestrator?.model,
+      effort: config?.orchestrator?.effort,
+      __state: working ? "working" : "waiting",
+      __statusTime: new Date(session.mtimeMs).toISOString()
+    };
+  });
+  return { ...(kit ?? {}), tracks: [...tracks, ...(kit?.tracks ?? [])] };
 }
 
 export async function buildWorkers(ctx) {
@@ -311,7 +381,8 @@ async function buildWorker(track, ctx) {
   });
   const identity = trackIdentity(engine, track);
   const shortTitle = trackShortTitle(track);
-  const state = workerState(status, ctx.now);
+  // Synthetic orchestrator tracks carry their state from the transcript age.
+  const state = track.__state ?? workerState(status, ctx.now);
   const stateKind = workerStateKind(state);
   const branch = String(track.branch || name);
   // Optional JSONL transcript of a Claude subagent; other engines ignore it.
@@ -334,7 +405,7 @@ async function buildWorker(track, ctx) {
     state,
     stateKind,
     stateText: STATE_TEXT[state] ?? state,
-    statusTime: status?.time ?? null,
+    statusTime: track.__statusTime ?? status?.time ?? null,
     model: modelText(engine, ctx.kit, ctx.config, track),
     workdir,
     branch,
@@ -366,6 +437,7 @@ export async function buildWorkerSteps(config, options = {}) {
       kitDir = null;
     }
   }
+  kit = withOrchestratorTracks(kit, project, config, now);
   const track = (kit?.tracks ?? []).find((entry) => entry && String(entry.name ?? "") === name);
   if (!track) return null;
 
@@ -398,17 +470,20 @@ export async function buildWorkerSteps(config, options = {}) {
 export function resolveWorkerWorkdir(config, options = {}) {
   const project = options.project;
   const name = String(options.worker ?? "");
-  if (!project?.kitConfig || !name) return null;
-  let kit;
-  try {
-    kit = JSON.parse(fs.readFileSync(project.kitConfig, "utf8"));
-  } catch {
-    return null;
+  if (!project || !name) return null;
+  let kit = null;
+  if (project.kitConfig) {
+    try {
+      kit = JSON.parse(fs.readFileSync(project.kitConfig, "utf8"));
+    } catch {
+      kit = null;
+    }
   }
+  kit = withOrchestratorTracks(kit, project, config, options.now ?? new Date());
   const track = (kit?.tracks ?? []).find((entry) => entry && String(entry.name ?? "") === name);
   if (!track) return null;
   const baseDir = config?.__baseDir ?? process.cwd();
-  return resolveKitPath(track.workdir, kit, path.dirname(project.kitConfig), baseDir);
+  return resolveKitPath(track.workdir, kit, project.kitConfig ? path.dirname(project.kitConfig) : null, baseDir);
 }
 
 // Red is only for real failures. A busy PC can delay the supervisor heartbeat

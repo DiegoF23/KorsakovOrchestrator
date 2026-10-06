@@ -297,3 +297,34 @@ test("worker cards take the colour of their branch lane, neutral when the tree l
   applyBranchColors(workers, null);
   assert.equal(workers[0].branchColor, NEUTRAL_BRANCH_COLOR);
 });
+
+test("recent Claude Code sessions of the project become orchestrator cards", async () => {
+  const { claudeProjectDir, withOrchestratorTracks } = await import("../lib/state.mjs");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "claude-home-"));
+  const repo = path.join(home, "Work Repo");
+  const dir = claudeProjectDir(repo, home);
+  assert.equal(path.basename(dir), path.resolve(repo).replace(/[^A-Za-z0-9]/g, "-"));
+  fs.mkdirSync(dir, { recursive: true });
+  const now = new Date("2026-10-06T12:00:00Z");
+  const touch = (name, minutesAgo) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, "{}\n");
+    const at = new Date(now.getTime() - minutesAgo * 60000);
+    fs.utimesSync(file, at, at);
+  };
+  touch("aaaaaaaa-1111.jsonl", 1);
+  touch("bbbbbbbb-2222.jsonl", 30);
+  touch("cccccccc-3333.jsonl", 600);
+  fs.mkdirSync(path.join(dir, "aaaaaaaa-1111", "subagents"), { recursive: true });
+
+  const kit = { tracks: [{ name: "builder-a", engine: "opencode" }] };
+  const out = withOrchestratorTracks(kit, { repo }, { orchestrator: { model: "claude-opus-5-5", effort: "high" } }, now, { home });
+  assert.deepEqual(out.tracks.map((track) => track.name), ["claude-aaaaaaaa", "claude-bbbbbbbb", "builder-a"]);
+  assert.equal(out.tracks[0].__state, "working");
+  assert.equal(out.tracks[1].__state, "waiting");
+  assert.equal(out.tracks[0].engine, "claude-code");
+  assert.equal(out.tracks[0].workdir, repo);
+  assert.equal(kit.tracks.length, 1, "the kit itself is never modified");
+  assert.equal(withOrchestratorTracks(kit, { repo }, { orchestratorSessions: false }, now, { home }), kit);
+  assert.equal(withOrchestratorTracks(kit, { repo: path.join(home, "nope") }, {}, now, { home }), kit);
+});
