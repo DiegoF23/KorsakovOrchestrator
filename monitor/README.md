@@ -145,8 +145,9 @@ animación.
 
 - **Pestañas**: cada archivo (escrituras, ediciones y lecturas del mismo
   archivo comparten una), cada comando (`$ <comando>`), cada llamada a memoria
-  (`mem: <título o consulta>`), cada otra herramienta, y una pestaña
-  **mensajes** para los textos. El nombre del archivo va como etiqueta y la
+  (`mem: <título o consulta>`), cada otra herramienta, una pestaña
+  **mensajes** para los textos y una pestaña **pensando** compartida por todos
+  los razonamientos. El nombre del archivo va como etiqueta y la
   ruta completa en el tooltip. Hay como máximo 12 pestañas: al superar el
   límite se descarta la más vieja que no esté activa. El color de cada pestaña
   sigue el estado del último paso (ámbar trabajando, verde terminado, rojo
@@ -195,6 +196,15 @@ animación.
   indentado con las claves en el color de acento y el resultado tipeado (texto
   plano si es una cadena, JSON si es un objeto), recortado visualmente a 200
   líneas.
+- **Pensando** (razonamiento del modelo): todos los razonamientos comparten una
+  sola pestaña **pensando**. Mientras el modelo piensa (el texto todavía no
+  llegó) se ve un circuito-cerebro animado, armado con SVG y los colores del
+  tema, y al lado `pensando m:ss` con el tiempo transcurrido actualizado cada
+  segundo; con `prefers-reduced-motion` el ícono queda quieto y el contador
+  sigue. Al terminar, el ícono se reemplaza por uno estático, aparece
+  `pensó m:ss` (cuando hay tiempos) y el razonamiento se tipea como los
+  mensajes; si supera los 4.000 caracteres se tipea solo el comienzo y un botón
+  **ver todo** muestra el resto de inmediato.
 - Todo el contenido de los agentes se inserta como texto (`textContent`), nunca
   como HTML, y todos los colores salen de los tokens del tema. El parser ANSI
   solo produce segmentos con un índice de color 0–15 que el visor pinta con
