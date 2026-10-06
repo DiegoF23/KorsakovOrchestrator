@@ -468,7 +468,10 @@ export function init(options = {}) {
     // the user scrolls up to read, it stops following until they scroll back
     // to the end.
     state.stickBottom = true;
+    state.savedScrollTop = 0;
     body.addEventListener("scroll", () => {
+      if (!body.isConnected || state.restoringScroll) return;
+      state.savedScrollTop = body.scrollTop;
       state.stickBottom = body.scrollHeight - body.scrollTop - body.clientHeight < STICK_THRESHOLD_PX;
     });
     panel.appendChild(strip);
@@ -675,6 +678,30 @@ export function init(options = {}) {
     if (state.stickBottom && state.body) state.body.scrollTop = state.body.scrollHeight;
   }
 
+  // attach() runs while the page re-renders the cards, before the new card is
+  // in the document, where setting scrollTop has no effect. A microtask runs
+  // right after that synchronous render (and before paint), when the card is
+  // already inserted. Scroll events are ignored meanwhile so the reset cannot
+  // turn following off. No requestAnimationFrame here: it does not run while
+  // the tab is hidden, and the positions must survive background refreshes.
+  function restoreScroll(state, tabsScroll) {
+    if (!state.body) return;
+    state.restoringScroll = true;
+    const apply = () => {
+      if (state.strip) state.strip.scrollTop = tabsScroll;
+      if (state.stickBottom) state.body.scrollTop = state.body.scrollHeight;
+      else state.body.scrollTop = state.savedScrollTop;
+    };
+    queueMicrotask(() => {
+      apply();
+      win.setTimeout(() => {
+        // Second pass in case the card was inserted later than the microtask.
+        if (state.body.isConnected) apply();
+        state.restoringScroll = false;
+      }, 0);
+    });
+  }
+
   function playItems(state, items, instant, done) {
     let index = 0;
     const next = () => {
@@ -800,8 +827,12 @@ export function init(options = {}) {
     if (head) head.appendChild(state.toggle);
     state.toggle.textContent = state.open ? "OCULTAR" : "VER";
     state.toggle.setAttribute("aria-expanded", state.open ? "true" : "false");
+    // Moving the panel into the freshly rendered card resets the browser's
+    // scroll positions to the top, so put them back where they were.
+    const tabsScroll = state.strip ? state.strip.scrollTop : 0;
     card.appendChild(state.panel);
     state.panel.hidden = !state.open;
+    restoreScroll(state, tabsScroll);
     renderFollow(state);
     if (state.open) {
       openStates.add(state);
