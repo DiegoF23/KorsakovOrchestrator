@@ -401,7 +401,10 @@ export async function buildWorkers(ctx) {
   const out = [];
   const renderedGroups = new Set();
   for (const track of ctx.kit?.tracks ?? []) {
-    if (!track || track.board === false) continue;
+    if (!track) continue;
+    // board: false hides a track, except while it is actually running: work
+    // the orchestrator hands out must show even if nobody flipped the flag.
+    if (track.board === false && !isRunningNow(track, ctx)) continue;
     let picked = track;
     if (track.group) {
       if (renderedGroups.has(track.group)) continue;
@@ -412,6 +415,16 @@ export async function buildWorkers(ctx) {
     out.push(await buildWorker(picked, ctx));
   }
   return out;
+}
+
+const RUNNING_FRESH_MS = 10 * 60000;
+
+function isRunningNow(track, ctx) {
+  if (!ctx.kitDir || track.group) return false;
+  const status = readJson(path.join(ctx.kitDir, `status-${String(track.name ?? "")}.json`));
+  if (status?.state !== "running") return false;
+  const time = new Date(status.time).getTime();
+  return Number.isFinite(time) && ctx.now.getTime() - time <= RUNNING_FRESH_MS;
 }
 
 // cleanup.hideFinishedAfterMinutes: when it holds a positive number, a card

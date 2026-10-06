@@ -366,3 +366,24 @@ test("subagents delegated by the project's Claude sessions become cards; the orc
   const off = withOrchestratorTracks({ tracks: [] }, { repo }, { claudeSubagents: false }, now, { home });
   assert.deepEqual(off.tracks, []);
 });
+test("a board:false track still shows while its status says it is running", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-board-"));
+  const transcript = path.join(dir, "agent.jsonl");
+  fs.copyFileSync(path.join(here, "fixtures", "claude-transcript.jsonl"), transcript);
+  const now = new Date("2026-10-06T12:00:00Z");
+  const status = (name, state, minutesAgo) =>
+    fs.writeFileSync(path.join(dir, `status-${name}.json`), JSON.stringify({ track: name, state, time: new Date(now.getTime() - minutesAgo * 60000).toISOString() }));
+  status("live", "running", 1);
+  status("stale", "running", 30);
+  status("done", "finished", 1);
+  const track = (name) => ({ name, engine: "claude-code", activityFile: transcript, board: false });
+  const workers = await buildWorkers({
+    kit: { tracks: [track("live"), track("stale"), track("done"), track("none")] },
+    kitDir: dir,
+    config: { __baseDir: dir, orchestrator: {} },
+    repo: null,
+    worktreeParent: null,
+    now
+  });
+  assert.deepEqual(workers.map((worker) => worker.name), ["live"]);
+});
