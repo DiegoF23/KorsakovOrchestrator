@@ -392,6 +392,25 @@ export async function buildWorkerSteps(config, options = {}) {
   }
 }
 
+// The folder a worker (kit track) runs in, resolved exactly like the cards do,
+// for the file endpoints. Null for an unknown worker or a track without one.
+// This is the only trust root those endpoints serve files from.
+export function resolveWorkerWorkdir(config, options = {}) {
+  const project = options.project;
+  const name = String(options.worker ?? "");
+  if (!project?.kitConfig || !name) return null;
+  let kit;
+  try {
+    kit = JSON.parse(fs.readFileSync(project.kitConfig, "utf8"));
+  } catch {
+    return null;
+  }
+  const track = (kit?.tracks ?? []).find((entry) => entry && String(entry.name ?? "") === name);
+  if (!track) return null;
+  const baseDir = config?.__baseDir ?? process.cwd();
+  return resolveKitPath(track.workdir, kit, path.dirname(project.kitConfig), baseDir);
+}
+
 // Red is only for real failures. A busy PC can delay the supervisor heartbeat
 // (written every ~60 s) and a builder is briefly gone between two attempts:
 // both show as amber instead of "detenido".
