@@ -1,7 +1,8 @@
 ﻿# Starts the fleet-monitor server hidden if it is not running yet and opens the
 # browser. Idempotent: running it again only reopens the page.
-# The server is created through WMI so it is detached from the calling shell:
-# it keeps running when the terminal or the agent session that started it ends.
+# The server runs under supervise.ps1 (logs + automatic restart), created
+# through WMI so it is detached from the calling shell: it keeps running when
+# the terminal or the agent session that started it ends.
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1 [-ConfigPath <ruta>] [-Port 4200] [-NoBrowser]
 param(
   [string]$ConfigPath = '',
@@ -53,8 +54,10 @@ if ($effectivePort -le 0) {
 if (Test-MonitorPort $effectivePort) {
   Write-Host "El monitor ya está corriendo en http://127.0.0.1:$effectivePort/."
 } else {
-  $commandLine = "`"$($node.Source)`" `"$server`""
-  if ($ConfigPath) { $commandLine += " `"$ConfigPath`"" }
+  # supervise.ps1 runs the server, keeps logs and restarts it if it exits.
+  $supervisor = Join-Path $dir 'supervise.ps1'
+  $commandLine = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$supervisor`""
+  if ($ConfigPath) { $commandLine += " -ConfigPath `"$ConfigPath`"" }
   $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
   $created = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
     CommandLine = $commandLine
