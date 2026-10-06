@@ -511,12 +511,17 @@ async function buildWorker(track, ctx) {
   // fallback for workers without a list.
   const progress = activity.progress ?? null;
   const lastStepAt = activity.lastStepAt ?? null;
-  const { remainingText: remaining, pace } = progressPace({
-    progress,
-    etaEnd: track.etaEnd,
-    now: ctx.now,
-    fallbackText: fallbackRemaining
-  });
+  // A finished or stopped worker keeps its status text ("terminado"): a todo
+  // list it left half-ticked must not project a remaining time or a pace.
+  const finished = stateKind === "done" || stateKind === "error";
+  const { remainingText: remaining, pace } = finished
+    ? { remainingText: fallbackRemaining, pace: null }
+    : progressPace({
+        progress,
+        etaEnd: track.etaEnd,
+        now: ctx.now,
+        fallbackText: fallbackRemaining
+      });
 
   return {
     name,
