@@ -127,15 +127,17 @@ export function createTranslationService(options = {}) {
       if (!isWorking(card)) continue;
       const sig = activitySignature(card.activity?.events);
       if (!sig) continue;
-      const cached = store.summaries[card.name];
+      const key = summaryKey(ctx.projectId, card.name);
+      const cached = store.summaries[key];
       if (cached && cached.sig === sig) {
         card.summaryEs = cached.text;
         continue;
       }
-      const lastAttempt = summaryAttempts.get(card.name) ?? -Infinity;
+      const lastAttempt = summaryAttempts.get(key) ?? -Infinity;
       if (now() - lastAttempt < summaryIntervalMs) continue;
       pendingSummaries.push({
         name: card.name,
+        key,
         sig,
         events: (card.activity?.events ?? []).slice(-MAX_SUMMARY_EVENTS)
       });
@@ -148,7 +150,7 @@ export function createTranslationService(options = {}) {
       .slice(0, MAX_BATCH)
       .map(([sha, subject]) => ({ sha, subject }));
     const summaries = batch.length ? [] : pendingSummaries.slice(0, 1);
-    for (const item of summaries) summaryAttempts.set(item.name, now());
+    for (const item of summaries) summaryAttempts.set(item.key, now());
     start(helper, batch, summaries);
     return snapshot;
   }
@@ -198,7 +200,7 @@ export function createTranslationService(options = {}) {
         });
         const text = cleanSummary(reply);
         if (!text) throw new Error("la respuesta no trajo resumen");
-        store.summaries[item.name] = { sig: item.sig, text };
+        store.summaries[item.key] = { sig: item.sig, text };
         saveStore(cacheFile, store);
       }
       failures = 0;
@@ -296,6 +298,14 @@ function helperSettings(ctx) {
 
 function isWorking(card) {
   return (card?.stateKind || card?.state) === "working";
+}
+
+// Two projects may name a track the same (for example "api"), so the summary
+// cache and the per-worker interval are keyed by project id when the snapshot
+// carries one.
+function summaryKey(projectId, name) {
+  const project = String(projectId ?? "").trim();
+  return project ? `${project}:${name}` : String(name ?? "");
 }
 
 function activitySignature(events) {

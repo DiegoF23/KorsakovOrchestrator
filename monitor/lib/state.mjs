@@ -31,6 +31,7 @@ const ENGINE_TO_ADAPTER = { "claude-code": "claude", codex: "codex", opencode: "
 const STATE_TEXT = { working: "trabajando", done: "terminado", error: "detenido", waiting: "esperando", stale: "sin reporte reciente" };
 // The git panel scrolls on its own, so it can afford the whole recent history.
 export const GIT_LOG_LIMIT = 200;
+export const DEFAULT_PROJECT_ID = "default";
 const cache = new Map();
 
 const PC_SCRIPT =
@@ -71,6 +72,51 @@ export function loadConfig(file) {
   };
 }
 
+// Normalizes the watch list of the monitor config. Without a `projects` array
+// the single implicit project reproduces today's behavior: top-level `repo`
+// and `workers.kitConfig`, id "default" and the repo folder as name. Each
+// explicit entry is `{ id, name, repo, kitConfig }`; repo and kitConfig
+// resolve like the top-level ones (against the config folder, with %VARS% and
+// ~ expanded) and name defaults to the repo folder. Pure and exported so the
+// normalization is unit-testable.
+export function resolveProjects(config) {
+  const source = config ?? {};
+  const baseDir = source.__baseDir ?? process.cwd();
+  const entries = Array.isArray(source.projects)
+    ? source.projects.filter((entry) => entry && typeof entry === "object")
+    : [];
+  if (entries.length === 0) {
+    const repo = resolvePathFrom(baseDir, source.repo);
+    return [
+      {
+        id: DEFAULT_PROJECT_ID,
+        name: projectName(repo, DEFAULT_PROJECT_ID),
+        repo,
+        kitConfig: resolvePathFrom(baseDir, source.workers?.kitConfig)
+      }
+    ];
+  }
+  return entries.map((entry, index) => {
+    const id = String(entry.id ?? "").trim() || `${DEFAULT_PROJECT_ID}-${index + 1}`;
+    const repo = resolvePathFrom(baseDir, entry.repo);
+    return {
+      id,
+      name: String(entry.name ?? "").trim() || projectName(repo, id),
+      repo,
+      kitConfig: resolvePathFrom(baseDir, entry.kitConfig)
+    };
+  });
+}
+
+function resolvePathFrom(baseDir, value) {
+  return value ? path.resolve(baseDir, expandVars(String(value))) : null;
+}
+
+function projectName(repo, fallback) {
+  const base = repo ? path.basename(repo) : "";
+  return base || fallback;
+}
+
 // Header data of the orchestrator: engine, model and effort as declared in
 // fleet-monitor.config.json, plus the ready-to-show "model · effort" text.
 export function orchestratorInfo(config) {
@@ -88,29 +134,30 @@ export function orchestratorInfo(config) {
 
 export async function buildSnapshot(config, options = {}) {
   const now = options.now ?? new Date();
+  const project = options.project ?? resolveProjects(config)[0];
   const notices = [];
   const baseDir = config.__baseDir ?? process.cwd();
 
   let kit = null;
   let kitDir = null;
-  if (config.workers?.kitConfig) {
+  if (project.kitConfig) {
     try {
-      kit = JSON.parse(fs.readFileSync(config.workers.kitConfig, "utf8"));
-      kitDir = path.dirname(config.workers.kitConfig);
+      kit = JSON.parse(fs.readFileSync(project.kitConfig, "utf8"));
+      kitDir = path.dirname(project.kitConfig);
     } catch {
-      notices.push(`No se pudo leer la configuración del kit: ${config.workers.kitConfig}`);
+      notices.push(`No se pudo leer la configuración del kit: ${project.kitConfig}`);
     }
   } else {
     notices.push("No hay una configuración de kit declarada.");
   }
 
   const repo =
-    config.repo ??
+    project.repo ??
     (kit?.repo ? path.resolve(kitDir ?? baseDir, expandVars(String(kit.repo))) : null);
   const worktreeParent = kit?.worktreeParent
     ? path.resolve(kitDir ?? baseDir, expandVars(String(kit.worktreeParent)))
     : null;
-  const ctx = { config, kit, kitDir, repo, worktreeParent, now };
+  const ctx = { config, kit, kitDir, repo, worktreeParent, now, project };
 
   const usages = await usageSnapshot(ctx);
   const builtWorkers = await buildWorkers(ctx);
@@ -122,7 +169,7 @@ export async function buildSnapshot(config, options = {}) {
     level: "ok",
     error: "no se pudo leer la carga del PC"
   });
-  const git = await memo(`git:${repo ?? ""}`, seconds(config.gitCacheSeconds, 10), () => gitGraph(repo), {
+  const git = await memo(`git:${project.id}:${repo ?? ""}`, seconds(config.gitCacheSeconds, 10), () => gitGraph(repo), {
     commits: [],
     branches: [],
     error: "sin repositorio configurado"
@@ -136,6 +183,7 @@ export async function buildSnapshot(config, options = {}) {
   const snapshot = {
     generatedAt: now.toISOString(),
     pollSeconds: Number(config.pollSeconds) || 5,
+    project: { id: project.id, name: project.name },
     orchestrator: orchestratorInfo(config),
     usages,
     workers,
@@ -148,13 +196,16 @@ export async function buildSnapshot(config, options = {}) {
     notices
   };
   // Spanish display layer: applies the cached translations and schedules one
-  // background helper call at most; it never delays this snapshot.
-  enrichSnapshot(snapshot, { kit, config, now });
+  // background helper call at most; it never delays this snapshot. The project
+  // id keeps the per-worker summary cache from leaking across projects.
+  enrichSnapshot(snapshot, { kit, config, now, projectId: project.id });
   return snapshot;
 }
 
 async function usageSnapshot(ctx) {
   const ttl = seconds(ctx.config.usageCacheSeconds, 60);
+  // Consumption is global: the cache key ignores the project, so every project
+  // shares the same meters.
   return memo(`usage:${ctx.config.__file}:${ctx.config.__mtimeMs ?? 0}`, ttl, async () => {
     const rows = [];
     for (const [adapterId, adapter] of Object.entries(ADAPTERS)) {

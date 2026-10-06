@@ -5,7 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { applyBranchColors, buildWorkers, GIT_LOG_LIMIT, hideFinishedWorkers, orchestratorInfo } from "../lib/state.mjs";
+import {
+  applyBranchColors,
+  buildSnapshot,
+  buildWorkers,
+  GIT_LOG_LIMIT,
+  hideFinishedWorkers,
+  orchestratorInfo,
+  resolveProjects
+} from "../lib/state.mjs";
 import { branchColor, NEUTRAL_BRANCH_COLOR } from "../lib/graph.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,6 +44,51 @@ test("the snapshot exposes the orchestrator model and effort for the header", ()
 test("the example monitor config declares the orchestrator effort", () => {
   const config = JSON.parse(fs.readFileSync(path.join(here, "..", "fleet-monitor.config.example.json"), "utf8"));
   assert.equal(config.orchestrator?.effort, "high");
+});
+
+test("without projects the config keeps one implicit default project", () => {
+  const repo = path.join(os.tmpdir(), "fleet-repo");
+  const kitConfig = path.join(repo, "autopilot", "kit.config.json");
+  const projects = resolveProjects({ __baseDir: "C:\\cfg", repo, workers: { kitConfig } });
+
+  assert.equal(projects.length, 1);
+  assert.deepEqual(projects[0], { id: "default", name: "fleet-repo", repo, kitConfig });
+});
+
+test("a projects list is normalized with its names and resolved relative paths", () => {
+  const base = path.join(os.tmpdir(), "fleet-projects");
+  const projects = resolveProjects({
+    __baseDir: base,
+    projects: [
+      { id: "korsakov", name: "Korsakov Orchestrator", repo: "../korsakov", kitConfig: "kits/korsakov.json" },
+      { id: "web" }
+    ]
+  });
+
+  assert.equal(projects.length, 2);
+  assert.deepEqual(projects[0], {
+    id: "korsakov",
+    name: "Korsakov Orchestrator",
+    repo: path.resolve(base, "../korsakov"),
+    kitConfig: path.resolve(base, "kits/korsakov.json")
+  });
+  assert.deepEqual(projects[1], { id: "web", name: "web", repo: null, kitConfig: null });
+});
+
+test("an implicit project without a repo falls back to the default name", () => {
+  const projects = resolveProjects({ __baseDir: os.tmpdir() });
+  assert.deepEqual(projects, [{ id: "default", name: "default", repo: null, kitConfig: null }]);
+});
+
+test("the snapshot names the project it was built for", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-snapshot-"));
+  const snapshot = await buildSnapshot(
+    { __baseDir: dir, workers: {}, pollSeconds: 5, translate: { enabled: false } },
+    { now: new Date("2026-10-05T12:00:00Z"), project: { id: "web", name: "Web", repo: null, kitConfig: null } }
+  );
+
+  assert.deepEqual(snapshot.project, { id: "web", name: "Web" });
+  assert.equal(snapshot.generatedAt, "2026-10-05T12:00:00.000Z");
 });
 
 test("the example monitor config hides finished cards after five minutes", () => {
