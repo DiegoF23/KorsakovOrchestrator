@@ -344,19 +344,157 @@ export function recentClaudeSubagents(dir, now = new Date(), options = {}) {
   return found.slice(0, options.maxSubagents ?? 6);
 }
 
-// Returns a copy of the kit with synthetic claude-code tracks in front of the
-// kit's own tracks. The kit file is never written.
+// -- Antigravity (agy) CLI runs ----------------------------------------------
+// An orchestrator may launch Gemini through the Antigravity CLI directly,
+// without registering a kit track; the monitor then has to discover the run by
+// itself. Every conversation lives in
+// ~/.gemini/antigravity-cli/brain/<conversation-id>/.system_generated/logs/
+// transcript.jsonl and is appended live while it runs. A conversation belongs
+// to the project when the head of its transcript mentions the project's repo
+// or the kit's worktree parent.
+export const AGY_BRAIN_RECENT_MS = 60 * 60000;
+const AGY_BRAIN_WORKING_MS = 3 * 60000;
+const AGY_BRAIN_MAX_CONVERSATIONS = 6;
+const AGY_BRAIN_HEAD_BYTES = 64 * 1024;
+
+export function agyBrainDir(home = os.homedir()) {
+  return path.join(home, ".gemini", "antigravity-cli", "brain");
+}
+
+// Recent conversations of the project, newest first: `{ id, file, mtimeMs,
+// title }`. `brainDir` is explicit so the tests never touch the real folder.
+// Only the head of each transcript is read, and the project's other runs keep
+// their slot even when unrelated conversations are newer.
+export function recentAgyConversations(brainDir, project, now = new Date(), options = {}) {
+  if (!brainDir) return [];
+  const recentMs = options.recentMs ?? AGY_BRAIN_RECENT_MS;
+  const max = options.max ?? AGY_BRAIN_MAX_CONVERSATIONS;
+  let entries;
+  try {
+    entries = fs.readdirSync(brainDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const transcripts = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(brainDir, entry.name, ".system_generated", "logs", "transcript.jsonl");
+    let mtimeMs;
+    try {
+      mtimeMs = fs.statSync(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    if (now.getTime() - mtimeMs > recentMs) continue;
+    transcripts.push({ id: entry.name, file, mtimeMs });
+  }
+  transcripts.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const needles = projectPathNeedles(project, options);
+  const found = [];
+  for (const transcript of transcripts) {
+    if (found.length >= max) break;
+    const head = readFileHead(transcript.file, AGY_BRAIN_HEAD_BYTES);
+    if (head === null || !mentionsAnyPath(head, needles)) continue;
+    found.push({ ...transcript, title: agyConversationTitle(head) });
+  }
+  return found;
+}
+
+// A transcript JSON-encodes every Windows path it touches, so "\\" and "/"
+// both appear; normalizing both sides folds the `file:///C:/...` form into the
+// same text. Comparison is case-insensitive.
+function normalizeMatchPath(value) {
+  return String(value ?? "")
+    .replace(/\\+/g, "/")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+function projectPathNeedles(project, options) {
+  return [project?.repo, project?.worktreeParent ?? options?.worktreeParent]
+    .map(normalizeMatchPath)
+    .filter(Boolean);
+}
+
+function mentionsAnyPath(text, needles) {
+  if (needles.length === 0) return false;
+  const haystack = normalizeMatchPath(text);
+  return needles.some((needle) => haystack.includes(needle));
+}
+
+// First line of the first USER_INPUT, without the wrapping XML tags and a
+// leading `/plan`, capped so the card never overflows. Pure; exported for the
+// sample check script.
+export function agyConversationTitle(text) {
+  for (const line of String(text ?? "").split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!entry || entry.type !== "USER_INPUT") continue;
+    const content = String(entry.content ?? "");
+    if (!content.trim()) continue;
+    const first = content
+      .replace(/<[^>]*>/g, "\n")
+      .split(/\r?\n/)
+      .map((piece) => piece.trim())
+      .find(Boolean) ?? "";
+    const title = first.replace(/^\/plan\b[ \t]*/i, "").trim();
+    if (title) return title.slice(0, 80);
+  }
+  return "";
+}
+
+function readFileHead(file, maxBytes) {
+  let fd = null;
+  try {
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    const length = Math.min(size, Math.max(1, Number(maxBytes) || 0));
+    const buffer = Buffer.alloc(length);
+    let read = 0;
+    while (read < length) {
+      const bytes = fs.readSync(fd, buffer, read, length - read, read);
+      if (bytes <= 0) break;
+      read += bytes;
+    }
+    return buffer.toString("utf8", 0, read);
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
+// Returns a copy of the kit with synthetic tracks in front of the kit's own
+// tracks. The kit file is never written.
 // - Subagents the project's Claude Code sessions delegated to: on by default
 //   (`config.claudeSubagents === false` turns them off). This is the work the
 //   orchestrator hands out, like the kit's builders.
 // - The orchestrator sessions themselves: off by default, the user prefers
 //   not to spend a card on them (`config.orchestratorSessions === true`).
+// - Antigravity CLI conversations of the project: on by default
+//   (`config.agyConversations === false` turns them off). The card's model is
+//   left undefined on purpose: nothing can tell which model a brain folder
+//   ran with, so the card reads "Antigravity" instead of guessing.
 export function withOrchestratorTracks(kit, project, config = {}, now = new Date(), options = {}) {
   if (!project?.repo) return kit;
   const dir = claudeProjectDir(project.repo, options.home);
   const subagents = config?.claudeSubagents === false ? [] : recentClaudeSubagents(dir, now, options);
   const sessions = config?.orchestratorSessions === true ? recentClaudeSessions(dir, now, options) : [];
-  if (!sessions.length && !subagents.length) return kit;
+  const conversations =
+    config?.agyConversations === false
+      ? []
+      : recentAgyConversations(
+          options.brainDir ?? agyBrainDir(options.home),
+          { repo: project.repo, worktreeParent: options.worktreeParent ?? resolveWorktreeParent(kit, project) },
+          now,
+          options
+        );
+  if (!sessions.length && !subagents.length && !conversations.length) return kit;
   const subagentTracks = subagents.map((agent) => {
     const working = now.getTime() - agent.mtimeMs <= ORCHESTRATOR_WORKING_MS;
     const real = transcriptModel(agent.file);
@@ -394,7 +532,31 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       __statusTime: new Date(session.mtimeMs).toISOString()
     };
   });
-  return { ...(kit ?? {}), tracks: [...subagentTracks, ...tracks, ...(kit?.tracks ?? [])] };
+  const agyTracks = conversations.map((conversation) => {
+    // No status file exists for a discovered run, so a transcript that stopped
+    // growing reads as finished and ages out like any other done card.
+    const working = now.getTime() - conversation.mtimeMs <= AGY_BRAIN_WORKING_MS;
+    return {
+      name: `agy-${conversation.id.slice(0, 8)}`,
+      engine: "antigravity",
+      title: conversation.title,
+      label: "Gemini · Antigravity",
+      workdir: project.repo,
+      activityFile: conversation.file,
+      activityFormat: "brain",
+      __state: working ? "working" : "done",
+      __statusTime: new Date(conversation.mtimeMs).toISOString()
+    };
+  });
+  return { ...(kit ?? {}), tracks: [...subagentTracks, ...tracks, ...agyTracks, ...(kit?.tracks ?? [])] };
+}
+
+// The kit's worktree parent resolved like buildSnapshot does (against the kit
+// file's folder, with %VARS% expanded), for the transcript path match.
+function resolveWorktreeParent(kit, project) {
+  if (!kit?.worktreeParent) return null;
+  const base = project?.kitConfig ? path.dirname(project.kitConfig) : null;
+  return base ? path.resolve(base, expandVars(String(kit.worktreeParent))) : String(kit.worktreeParent);
 }
 
 export async function buildWorkers(ctx) {
@@ -500,7 +662,7 @@ async function buildWorker(track, ctx) {
 
   const [activity, lastCommit] = await Promise.all([
     adapter
-      .activity({ name, workdir, activityFile }, ctx)
+      .activity({ name, workdir, activityFile, activityFormat: track.activityFormat }, ctx)
       .catch(() => ({ events: [], notice: "sin actividad visible" })),
     gitLastCommit(ctx.repo, branch)
   ]);
@@ -567,7 +729,7 @@ export async function buildWorkerSteps(config, options = {}) {
   const workdir = resolveKitPath(track.workdir, kit, kitDir, baseDir);
   const activityFile = resolveKitPath(track.activityFile, kit, kitDir, baseDir);
   try {
-    const result = await adapter.steps({ name, workdir, activityFile }, ctx);
+    const result = await adapter.steps({ name, workdir, activityFile, activityFormat: track.activityFormat }, ctx);
     return { engine, steps: result?.steps ?? [], notice: result?.notice ?? null };
   } catch {
     return { engine, steps: [], notice: "sin pasos visibles" };
