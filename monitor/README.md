@@ -163,15 +163,42 @@ animación.
 - **Visores**: escrituras y ediciones como hoja de código con números de línea
   (la edición muestra primero el texto viejo tachado y después tipea el nuevo);
   lecturas como una línea "leído" con un barrido sutil; mensajes en un panel
-  simple; comandos, memoria y otras herramientas como ficha genérica con sus
-  campos importantes. Un paso `running` sin contenido muestra **escribiendo…**
-  y se reemplaza cuando llega terminado, y `truncated: true` avisa
-  **contenido recortado**. El resaltado de sintaxis es propio (sin librerías)
-  para JS/TS, JSON, CSS, HTML, Markdown, PowerShell, Python y shell; las
-  extensiones desconocidas quedan en texto plano.
+  simple. Los comandos, la memoria y las demás herramientas tienen fichas
+  propias (ver abajo). Un paso `running` sin contenido muestra
+  **escribiendo…** y se reemplaza cuando llega terminado, y `truncated: true`
+  avisa **contenido recortado**. El resaltado de sintaxis es propio (sin
+  librerías) para JS/TS, JSON, CSS, HTML, Markdown, PowerShell, Python y shell;
+  las extensiones desconocidas quedan en texto plano.
+- **Mini terminal** (comandos): panel oscuro con la fuente monoespaciada y los
+  colores ANSI del tema (`--ansi-0` a `--ansi-15`). Primero se tipea el prompt
+  `$ ` y el comando, después la salida aparece línea por línea (rápido, acotada
+  a ~1,5 s) y al final va la línea de estado: `exit 0` en verde, `exit <n>` en
+  rojo o `exit ?` en gris cuando no hay código. Un comando en curso muestra un
+  cursor que parpadea. La salida se recorta a las últimas 400 líneas visibles y
+  avisa **… N líneas anteriores** arriba. El parser ANSI es propio: soporta
+  negrita, tenue, itálica, subrayado, colores de texto y fondo de 16 y de 256
+  colores (mapeados al tono más cercano de los 16), y descarta cualquier otra
+  secuencia de escape (movimientos de cursor, borrados, títulos OSC) en vez de
+  mostrarla.
+- **Ficha de memoria** (Engram): encabezado `ENGRAM · <acción>` con un ícono
+  animado hecho solo con CSS y tokens. En `save`, `update` y `session_summary`
+  muestra los chips del tipo, el título tipeado y el contenido en un bloque
+  preformateado que conserva los saltos de línea y pinta las etiquetas
+  `**What**:` en el color de acento (sin librería de Markdown). En `search`,
+  `context` y `get_observation` tipea la consulta y después los resultados: si
+  la salida es un JSON con una lista de elementos con `title` (en `results`,
+  `observations` o la raíz) muestra una fila por elemento con su tipo e id,
+  tipeadas una por una; si no, muestra el texto crudo. Un error pinta el borde
+  de la ficha en rojo y tipea el texto del error.
+- **Ficha de herramienta**: encabezado con el nombre (un prefijo `mcp__<servidor>__`
+  se separa en un chip `servidor` y el nombre corto), los parámetros como JSON
+  indentado con las claves en el color de acento y el resultado tipeado (texto
+  plano si es una cadena, JSON si es un objeto), recortado visualmente a 200
+  líneas.
 - Todo el contenido de los agentes se inserta como texto (`textContent`), nunca
-  como HTML, y todos los colores salen de los tokens del tema. La mini terminal
-  con colores ANSI y la ficha de memoria dedicada son la parte B.
+  como HTML, y todos los colores salen de los tokens del tema. El parser ANSI
+  solo produce segmentos con un índice de color 0–15 que el visor pinta con
+  `var(--ansi-N)`.
 
 ## Traducciones y resúmenes
 
