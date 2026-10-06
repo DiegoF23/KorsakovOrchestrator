@@ -304,13 +304,79 @@ export function transcriptModel(file, maxBytes = 262144) {
   };
 }
 
-// Returns a copy of the kit with one synthetic track per recent Claude Code
-// session of the project in front of the kit's own tracks. The kit file is
-// never written. `config.orchestratorSessions === false` turns it off.
+// Subagents a Claude Code session delegated work to: each one has its own
+// transcript in <session>/subagents/agent-<id>.jsonl plus a .meta.json with
+// its description, type and requested model. Recent ones come first.
+export function recentClaudeSubagents(dir, now = new Date(), options = {}) {
+  if (!dir) return [];
+  const recentMs = options.recentMs ?? ORCHESTRATOR_RECENT_MS;
+  let sessions;
+  try {
+    sessions = fs.readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  } catch {
+    return [];
+  }
+  const found = [];
+  for (const session of sessions) {
+    const subDir = path.join(dir, session.name, "subagents");
+    let files;
+    try {
+      files = fs.readdirSync(subDir);
+    } catch {
+      continue;
+    }
+    for (const name of files) {
+      if (!name.endsWith(".jsonl")) continue;
+      const file = path.join(subDir, name);
+      let mtimeMs;
+      try {
+        mtimeMs = fs.statSync(file).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (now.getTime() - mtimeMs > recentMs) continue;
+      const id = name.slice(0, -".jsonl".length).replace(/^agent-/, "");
+      const meta = readJson(path.join(subDir, `${name.slice(0, -".jsonl".length)}.meta.json`)) ?? {};
+      found.push({ id, file, mtimeMs, meta });
+    }
+  }
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return found.slice(0, options.maxSubagents ?? 6);
+}
+
+// Returns a copy of the kit with synthetic claude-code tracks in front of the
+// kit's own tracks. The kit file is never written.
+// - Subagents the project's Claude Code sessions delegated to: on by default
+//   (`config.claudeSubagents === false` turns them off). This is the work the
+//   orchestrator hands out, like the kit's builders.
+// - The orchestrator sessions themselves: off by default, the user prefers
+//   not to spend a card on them (`config.orchestratorSessions === true`).
 export function withOrchestratorTracks(kit, project, config = {}, now = new Date(), options = {}) {
-  if (config?.orchestratorSessions === false || !project?.repo) return kit;
-  const sessions = recentClaudeSessions(claudeProjectDir(project.repo, options.home), now, options);
-  if (!sessions.length) return kit;
+  if (!project?.repo) return kit;
+  const dir = claudeProjectDir(project.repo, options.home);
+  const subagents = config?.claudeSubagents === false ? [] : recentClaudeSubagents(dir, now, options);
+  const sessions = config?.orchestratorSessions === true ? recentClaudeSessions(dir, now, options) : [];
+  if (!sessions.length && !subagents.length) return kit;
+  const subagentTracks = subagents.map((agent) => {
+    const working = now.getTime() - agent.mtimeMs <= ORCHESTRATOR_WORKING_MS;
+    const real = transcriptModel(agent.file);
+    const description = String(agent.meta.description ?? "").trim() || `subagente ${agent.id.slice(0, 8)}`;
+    return {
+      name: `sub-${agent.id.slice(0, 10)}`,
+      engine: "claude-code",
+      title: description,
+      label: `Subagente Claude · ${agent.meta.agentType ?? "agente"}`,
+      workdir: project.repo,
+      activityFile: agent.file,
+      branch: "main",
+      model: real.model ?? agent.meta.model ?? undefined,
+      effort: real.effort ?? undefined,
+      // A subagent that stopped writing is finished; the board hides it after
+      // cleanup.hideFinishedAfterMinutes like any other finished worker.
+      __state: working ? "working" : "done",
+      __statusTime: new Date(agent.mtimeMs).toISOString()
+    };
+  });
   const tracks = sessions.map((session) => {
     const working = now.getTime() - session.mtimeMs <= ORCHESTRATOR_WORKING_MS;
     const real = transcriptModel(session.file);
@@ -328,7 +394,7 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       __statusTime: new Date(session.mtimeMs).toISOString()
     };
   });
-  return { ...(kit ?? {}), tracks: [...tracks, ...(kit?.tracks ?? [])] };
+  return { ...(kit ?? {}), tracks: [...subagentTracks, ...tracks, ...(kit?.tracks ?? [])] };
 }
 
 export async function buildWorkers(ctx) {

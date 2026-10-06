@@ -318,7 +318,7 @@ test("recent Claude Code sessions of the project become orchestrator cards", asy
   fs.mkdirSync(path.join(dir, "aaaaaaaa-1111", "subagents"), { recursive: true });
 
   const kit = { tracks: [{ name: "builder-a", engine: "opencode" }] };
-  const out = withOrchestratorTracks(kit, { repo }, { orchestrator: { model: "claude-opus-5-5", effort: "high" } }, now, { home });
+  const out = withOrchestratorTracks(kit, { repo }, { orchestratorSessions: true, orchestrator: { model: "claude-opus-5-5", effort: "high" } }, now, { home });
   assert.deepEqual(out.tracks.map((track) => track.name), ["claude-aaaaaaaa", "claude-bbbbbbbb", "builder-a"]);
   assert.equal(out.tracks[0].__state, "working");
   assert.equal(out.tracks[1].__state, "waiting");
@@ -339,4 +339,30 @@ test("an orchestrator card names the model and effort the session really uses", 
   ].join("\n"));
   assert.deepEqual(transcriptModel(file), { model: "claude-opus-5-5", effort: "medium" });
   assert.deepEqual(transcriptModel(path.join(dir, "missing.jsonl")), { model: null, effort: null });
+});
+test("subagents delegated by the project's Claude sessions become cards; the orchestrator itself is off by default", async () => {
+  const { claudeProjectDir, withOrchestratorTracks } = await import("../lib/state.mjs");
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "claude-sub-"));
+  const repo = path.join(home, "Repo");
+  const dir = claudeProjectDir(repo, home);
+  const sub = path.join(dir, "session-1", "subagents");
+  fs.mkdirSync(sub, { recursive: true });
+  const now = new Date("2026-10-06T12:00:00Z");
+  const write = (file, text, minutesAgo) => {
+    fs.writeFileSync(file, text);
+    const at = new Date(now.getTime() - minutesAgo * 60000);
+    fs.utimesSync(file, at, at);
+  };
+  write(path.join(dir, "session-1.jsonl"), "{}\n", 1);
+  write(path.join(sub, "agent-abc123def456.jsonl"), JSON.stringify({ type: "assistant", message: { model: "claude-sonnet-5-5" } }) + "\n", 1);
+  fs.writeFileSync(path.join(sub, "agent-abc123def456.meta.json"), JSON.stringify({ agentType: "general-purpose", description: "Fix the login form", model: "sonnet" }));
+  write(path.join(sub, "agent-old999old999.jsonl"), "{}\n", 300);
+
+  const out = withOrchestratorTracks({ tracks: [] }, { repo }, {}, now, { home });
+  assert.deepEqual(out.tracks.map((track) => track.name), ["sub-abc123def4"]);
+  assert.equal(out.tracks[0].title, "Fix the login form");
+  assert.equal(out.tracks[0].model, "claude-sonnet-5-5");
+  assert.equal(out.tracks[0].__state, "working");
+  const off = withOrchestratorTracks({ tracks: [] }, { repo }, { claudeSubagents: false }, now, { home });
+  assert.deepEqual(off.tracks, []);
 });
