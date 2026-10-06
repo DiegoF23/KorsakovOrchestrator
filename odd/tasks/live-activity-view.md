@@ -57,3 +57,4 @@ Today the server shrinks every agent step to one line (`EDIT path`) and drops th
 ## Next step
 
 T1 and T2 in parallel (independent files except a small overlap in `lib/state.mjs`).
+- User feedback on T3a (2026-10-05): the viewer grew and shrank while steps played, and the scroll stayed at the top while text was typed. Claude fix on `main`: fixed viewer size (tab strip 62 px = three rows, scrolls past that; body 200 px; no nested max-height on code blocks) and stick-to-bottom scrolling (follows the typing; scrolling up pauses it; switching tab re-enables it). Measured in the browser: viewer constant at 269 px over 4 s of replay, body always at the bottom. Expect a merge conflict with T3b in `index.html`/`live-view.mjs`.

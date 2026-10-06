@@ -15,6 +15,8 @@ export const TYPING_MAX_MS = 3000;
 export const MIN_CHARS_PER_FRAME = 2;
 export const FRAME_MS = 1000 / 60;
 export const MAX_BLOCKS_PER_TAB = 40;
+// Distance from the bottom, in pixels, still counted as "at the end".
+const STICK_THRESHOLD_PX = 24;
 const STORAGE_PREFIX = "fleet-monitor.live.";
 
 // ---------------------------------------------------------------------------
@@ -462,6 +464,13 @@ export function init(options = {}) {
     const body = el(doc, "div", "live-body");
     const content = el(doc, "div", "live-content");
     body.appendChild(content);
+    // The body sticks to its bottom while text is typed, like a terminal. If
+    // the user scrolls up to read, it stops following until they scroll back
+    // to the end.
+    state.stickBottom = true;
+    body.addEventListener("scroll", () => {
+      state.stickBottom = body.scrollHeight - body.scrollTop - body.clientHeight < STICK_THRESHOLD_PX;
+    });
     panel.appendChild(strip);
     panel.appendChild(body);
     const toggle = el(doc, "button", "live-toggle", "VER");
@@ -616,10 +625,16 @@ export function init(options = {}) {
   function activateTab(state, key) {
     const dom = state.tabEls.get(key);
     if (!dom) return;
+    const switched = state.activeKey !== key;
     state.activeKey = key;
     state.content.replaceChildren(dom.content);
     for (const [tabKey, tabDom] of state.tabEls) {
       tabDom.button.classList.toggle("active", tabKey === key);
+    }
+    // A newly shown tab opens at its latest line and follows it again.
+    if (switched) {
+      state.stickBottom = true;
+      followBottom(state);
     }
   }
 
@@ -652,7 +667,12 @@ export function init(options = {}) {
     }
     const items = blocks.map((block) => buildBlock(state, block));
     for (const item of items) wrap.appendChild(item.el);
+    followBottom(state);
     playItems(state, items, instant, done);
+  }
+
+  function followBottom(state) {
+    if (state.stickBottom && state.body) state.body.scrollTop = state.body.scrollHeight;
   }
 
   function playItems(state, items, instant, done) {
@@ -712,6 +732,7 @@ export function init(options = {}) {
     const finish = () => {
       renderHighlighted(pre, text, block.lang);
       if (gutter) gutter.textContent = lineNumbers(text);
+      followBottom(state);
       next();
     };
     if (instant || !text.length) {
@@ -730,6 +751,7 @@ export function init(options = {}) {
       index = Math.min(text.length, index + plan.charsPerFrame);
       pre.textContent = text.slice(0, index);
       if (gutter) gutter.textContent = lineNumbers(text.slice(0, index));
+      followBottom(state);
       if (index >= text.length) {
         finish();
         return;

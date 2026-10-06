@@ -609,12 +609,21 @@
     min-width: 0;
   }
   .live-viewer[hidden] { display: none; }
+  /* The viewer keeps a fixed size so the cards never jump while steps play:
+     the tab strip has room for three rows (it scrolls past that) and the body
+     has a fixed height with its own scroll. */
   .live-tabs {
     display: flex;
     flex-wrap: wrap;
+    align-content: flex-start;
     align-items: center;
     gap: 3px;
     min-width: 0;
+    height: 62px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar) transparent;
   }
   .live-tab-box { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 3px; min-width: 0; }
   .live-tab,
@@ -650,7 +659,7 @@
   .live-collapse { color: var(--live); min-width: 18px; text-align: center; }
   .live-body {
     margin-top: 3px;
-    max-height: 200px;
+    height: 200px;
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
@@ -681,8 +690,6 @@
     line-height: 1.35;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    max-height: 150px;
-    overflow: auto;
   }
   .live-pre.removed {
     background: var(--code-removed-bg);
