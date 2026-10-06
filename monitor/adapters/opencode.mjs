@@ -333,11 +333,16 @@ export function progressFromMessages(messages) {
 
 export async function activity(worker, ctx = {}) {
   try {
-    const { messages, notice } = await fetchSessionMessages(worker, ctx);
+    const { messages, notice, base, inDir, picked } = await fetchSessionMessages(worker, ctx);
     if (notice) return { events: [], notice };
     const events = mapOpenCodeMessages(messages, ctx).slice(-15);
     const { progress, lastStepAt } = progressFromMessages(messages);
-    return withActivityProgress({ events, notice: events.length ? null : "sin eventos" }, progress, lastStepAt);
+    // A relaunched track starts a fresh session without its own list; until it
+    // writes one, the newest list of the earlier attempts of the same track is
+    // carried. The current attempt's own list always wins and older sessions
+    // are not fetched at all when it exists.
+    const shown = progress ?? (await carryProgress(base, inDir, picked, worker?.name, ctx));
+    return withActivityProgress({ events, notice: events.length ? null : "sin eventos" }, shown, lastStepAt);
   } catch {
     return { events: [], notice: "sin sesión activa" };
   }
@@ -366,12 +371,24 @@ export function pickSession(sessions, trackName) {
   const newest = (items) => [...items].sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))[0] ?? null;
   const name = String(trackName ?? "").trim().toLowerCase();
   if (name) {
-    const titled = list.filter((session) =>
-      String(session?.title ?? "").toLowerCase().split(/\s+/).includes(name)
-    );
+    const titled = list.filter((session) => titleHasTrack(session, name));
     if (titled.length) return newest(titled);
   }
   return newest(list);
+}
+
+// The older attempts of one track: same folder (the caller already filtered by
+// directory), title naming the track the way pickSession matches it, newest
+// first, at most `limit` (3 by default). The picked session is never a
+// candidate.
+export function previousTrackSessions(sessions, picked, trackName, limit = 3) {
+  const name = String(trackName ?? "").trim().toLowerCase();
+  const max = Number(limit);
+  if (!name || !picked?.id || !Number.isFinite(max) || max < 1) return [];
+  return (Array.isArray(sessions) ? sessions : [])
+    .filter((session) => session?.id && session.id !== picked.id && titleHasTrack(session, name))
+    .sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0))
+    .slice(0, Math.floor(max));
 }
 
 // Picks the worker's session in its directory and returns its messages;
@@ -381,11 +398,12 @@ async function fetchSessionMessages(worker, ctx) {
   const port = ctx.kit?.server?.port;
   if (!port) return { messages: null, notice: "sin actividad visible" };
   const base = `http://${host}:${port}`;
+  const request = ctx.fetchJson ?? fetchJson;
   const directory = worker?.workdir ?? "";
   const url = directory
     ? `${base}/session?directory=${encodeURIComponent(directory)}`
     : `${base}/session`;
-  const sessions = await fetchJson(url, 5000);
+  const sessions = await request(url, 5000);
   const wanted = normalizeDir(directory);
   const inDir = Array.isArray(sessions)
     ? wanted
@@ -394,8 +412,62 @@ async function fetchSessionMessages(worker, ctx) {
     : [];
   const picked = pickSession(inDir, worker?.name);
   if (!picked?.id) return { messages: null, notice: "sin sesión activa" };
-  const messages = await fetchJson(`${base}/session/${encodeURIComponent(picked.id)}/message`, 8000);
-  return { messages, notice: null };
+  const messages = await request(`${base}/session/${encodeURIComponent(picked.id)}/message`, 8000);
+  return { messages, notice: null, base, inDir, picked };
+}
+
+// Older sessions are fetched only when the current attempt has no todo list of
+// its own; their messages are cached per session id for 60 s so the 5 s board
+// refresh does not hit the server again for the same attempt.
+const CARRY_TTL_MS = 60000;
+const carryCache = new Map();
+
+export function clearCarryCache() {
+  carryCache.clear();
+}
+
+function cachedCarryMessages(id, now) {
+  const cached = carryCache.get(id);
+  return cached && now - cached.at < CARRY_TTL_MS ? cached.messages : null;
+}
+
+function rememberCarryMessages(id, messages, now) {
+  for (const [key, entry] of carryCache) {
+    if (now - entry.at >= CARRY_TTL_MS) carryCache.delete(key);
+  }
+  carryCache.set(id, { at: now, messages });
+}
+
+// The newest todo list found in the earlier attempts of the same track (at
+// most 3, newest first), flagged as carried. The list keeps its items, statuses
+// and firstAt, so the measured pace keeps counting from when that work started.
+async function carryProgress(base, sessions, picked, trackName, ctx) {
+  if (!base) return null;
+  const now = nowMs(ctx);
+  const request = ctx.fetchJson ?? fetchJson;
+  for (const session of previousTrackSessions(sessions, picked, trackName)) {
+    let messages = cachedCarryMessages(session.id, now);
+    if (!messages) {
+      try {
+        messages = await request(`${base}/session/${encodeURIComponent(session.id)}/message`, 8000);
+      } catch {
+        continue;
+      }
+      rememberCarryMessages(session.id, messages, now);
+    }
+    const { progress } = progressFromMessages(messages);
+    if (progress) return { ...progress, carried: true };
+  }
+  return null;
+}
+
+function titleHasTrack(session, lowerName) {
+  return String(session?.title ?? "").toLowerCase().split(/\s+/).includes(lowerName);
+}
+
+function nowMs(ctx) {
+  const value = ctx?.now instanceof Date ? ctx.now.getTime() : Number(ctx?.now);
+  return Number.isFinite(value) && value > 0 ? value : Date.now();
 }
 
 async function runEstimate(script, sinceMs, ctx) {

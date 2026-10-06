@@ -29,7 +29,15 @@ import {
   parseRateLimitsFromText,
   steps as codexSteps
 } from "../adapters/codex.mjs";
-import { mapOpenCodeMessages, mapOpenCodeSteps, mergeOfficialUsage, sumEstimatePct } from "../adapters/opencode.mjs";
+import {
+  activity as openCodeActivity,
+  clearCarryCache,
+  mapOpenCodeMessages,
+  mapOpenCodeSteps,
+  mergeOfficialUsage,
+  previousTrackSessions,
+  sumEstimatePct
+} from "../adapters/opencode.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixtures = path.join(here, "fixtures");
@@ -979,4 +987,199 @@ test("two builders sharing a folder each get their own OpenCode session by title
   assert.equal(pickSession(sessions, "research-ubicar").id, "b");
   assert.equal(pickSession(sessions, "unknown").id, "d", "no title match falls back to the newest");
   assert.equal(pickSession([], "x"), null);
+});
+
+const CARRY_DIR = "C:\\Users\\DiegoFA\\Desktop\\FlotaGrupo-worktrees\\mail-alerts";
+const CARRY_CTX = { kit: { server: { port: 4096 } } };
+
+function carrySession(id, attempt, updated, directory = CARRY_DIR) {
+  return { id, title: `flota mail-alerts attempt ${attempt}`, directory, time: { updated } };
+}
+
+function todoMessages(id, ms, todos) {
+  return [
+    {
+      info: { id, time: { created: ms, completed: ms } },
+      parts: [
+        {
+          id: `${id}-todo`,
+          type: "tool",
+          tool: "todowrite",
+          state: { status: "completed", input: { todos } }
+        }
+      ]
+    }
+  ];
+}
+
+function textMessages(id, ms) {
+  return [
+    {
+      info: { id, role: "assistant", time: { created: ms, completed: ms } },
+      parts: [{ id: `${id}-text`, type: "text", text: "sigo trabajando" }]
+    }
+  ];
+}
+
+// Minimal OpenCode server: /session lists the sessions, /session/:id/message
+// answers with the canned messages, and every request is logged so the tests
+// can count the fetches.
+function stubOpenCodeServer({ sessions, byId, log = [] }) {
+  const fetchJson = async (url) => {
+    log.push(url);
+    const parsed = new URL(url);
+    if (parsed.pathname === "/session") return sessions;
+    const match = /^\/session\/([^/]+)\/message$/.exec(parsed.pathname);
+    if (match) return byId[decodeURIComponent(match[1])] ?? [];
+    throw new Error(`unexpected ${url}`);
+  };
+  return { fetchJson, log };
+}
+
+const carryFetches = (log, id) => log.filter((url) => url.includes(`/session/${id}/message`)).length;
+
+test("previousTrackSessions lists the older attempts of the same track, newest first, capped at three", () => {
+  const sessions = [
+    carrySession("a5", 5, 50),
+    carrySession("a7", 7, 70),
+    carrySession("a6", 6, 60),
+    carrySession("a4", 4, 40),
+    carrySession("a3", 3, 30),
+    { id: "other", title: "flota research-import attempt 6", directory: CARRY_DIR, time: { updated: 65 } },
+    { id: "extra", title: "flota mail-alerts-extra attempt 1", directory: CARRY_DIR, time: { updated: 80 } }
+  ];
+  const picked = { id: "a7" };
+  assert.deepEqual(previousTrackSessions(sessions, picked, "mail-alerts").map((s) => s.id), ["a6", "a5", "a4"]);
+  assert.deepEqual(previousTrackSessions(sessions, picked, "mail-alerts", 1).map((s) => s.id), ["a6"]);
+  assert.deepEqual(previousTrackSessions(sessions, picked, ""), [], "without a track name there is no track to match");
+  assert.deepEqual(previousTrackSessions(sessions, null, "mail-alerts"), []);
+});
+
+test("opencode activity keeps the current attempt's own todo list", async () => {
+  clearCarryCache();
+  const sessions = [carrySession("cur", 7, 70), carrySession("a6", 6, 60)];
+  const byId = {
+    cur: todoMessages("cur", 100000, [{ content: "actual", status: "in_progress" }]),
+    a6: todoMessages("a6", 50000, [{ content: "vieja", status: "pending" }])
+  };
+  const { fetchJson, log } = stubOpenCodeServer({ sessions, byId });
+  const result = await openCodeActivity(
+    { name: "mail-alerts", workdir: CARRY_DIR },
+    { ...CARRY_CTX, fetchJson }
+  );
+
+  assert.equal(result.progress.current, "actual");
+  assert.equal(result.progress.carried, undefined, "the current list is never flagged as carried");
+  assert.equal(carryFetches(log, "a6"), 0, "the older attempt is not even fetched");
+});
+
+test("opencode activity carries the newest earlier list when the current attempt has none", async () => {
+  clearCarryCache();
+  const sessions = [carrySession("cur", 7, 70), carrySession("a6", 6, 60), carrySession("a5", 5, 50)];
+  const byId = {
+    cur: textMessages("cur", 110000),
+    a6: todoMessages("a6", 60000, [
+      { content: "uno", status: "completed" },
+      { content: "dos", status: "in_progress" }
+    ]),
+    a5: todoMessages("a5", 50000, [{ content: "muy vieja", status: "pending" }])
+  };
+  const { fetchJson, log } = stubOpenCodeServer({ sessions, byId });
+  const result = await openCodeActivity(
+    { name: "mail-alerts", workdir: CARRY_DIR },
+    { ...CARRY_CTX, fetchJson }
+  );
+
+  assert.equal(result.progress.carried, true);
+  assert.equal(result.progress.done, 1);
+  assert.equal(result.progress.total, 2);
+  assert.equal(result.progress.current, "dos");
+  assert.equal(result.progress.firstAt, new Date(60000).toISOString(), "the carried list keeps the earlier firstAt");
+  assert.equal(result.progress.lastStepAt, new Date(60000).toISOString());
+  assert.equal(result.lastStepAt, new Date(110000).toISOString(), "idle tracking stays on the current attempt");
+  assert.equal(carryFetches(log, "a5"), 0, "the newest list found is enough");
+});
+
+test("opencode activity ignores the earlier attempts of another track", async () => {
+  clearCarryCache();
+  const sessions = [
+    carrySession("cur", 3, 70),
+    { id: "other", title: "flota research-import attempt 6", directory: CARRY_DIR, time: { updated: 60 } }
+  ];
+  const byId = {
+    cur: textMessages("cur", 90000),
+    other: todoMessages("other", 60000, [{ content: "ajena", status: "in_progress" }])
+  };
+  const { fetchJson, log } = stubOpenCodeServer({ sessions, byId });
+  const result = await openCodeActivity(
+    { name: "mail-alerts", workdir: CARRY_DIR },
+    { ...CARRY_CTX, fetchJson }
+  );
+
+  assert.equal(result.progress, undefined, "a list of another track is never carried");
+  assert.equal(carryFetches(log, "other"), 0);
+});
+
+test("opencode activity stays without progress when no earlier attempt has a list", async () => {
+  clearCarryCache();
+  const sessions = [carrySession("cur", 7, 70), carrySession("a6", 6, 60)];
+  const byId = { cur: textMessages("cur", 110000), a6: textMessages("a6", 60000) };
+  const { fetchJson } = stubOpenCodeServer({ sessions, byId });
+  const result = await openCodeActivity(
+    { name: "mail-alerts", workdir: CARRY_DIR },
+    { ...CARRY_CTX, fetchJson }
+  );
+
+  assert.equal(result.progress, undefined);
+  assert.equal(result.notice, null);
+});
+
+test("opencode activity caches the earlier attempts' messages for 60 seconds", async () => {
+  clearCarryCache();
+  const sessions = [carrySession("cur", 7, 70), carrySession("a6", 6, 60)];
+  const byId = {
+    cur: textMessages("cur", 110000),
+    a6: todoMessages("a6", 60000, [{ content: "uno", status: "completed" }])
+  };
+  const { fetchJson, log } = stubOpenCodeServer({ sessions, byId });
+  const worker = { name: "mail-alerts", workdir: CARRY_DIR };
+  const at = (ms) => new Date(1000000 + ms);
+
+  const first = await openCodeActivity(worker, { ...CARRY_CTX, fetchJson, now: at(0) });
+  assert.equal(first.progress.carried, true);
+  assert.equal(carryFetches(log, "a6"), 1);
+
+  const cached = await openCodeActivity(worker, { ...CARRY_CTX, fetchJson, now: at(30000) });
+  assert.equal(cached.progress.carried, true, "the cached messages still carry the list");
+  assert.equal(carryFetches(log, "a6"), 1, "within the minute the older attempt is not fetched again");
+
+  await openCodeActivity(worker, { ...CARRY_CTX, fetchJson, now: at(61000) });
+  assert.equal(carryFetches(log, "a6"), 2, "after the minute the messages are fetched again");
+});
+
+test("opencode activity skips an unreadable earlier attempt and tries the next one", async () => {
+  clearCarryCache();
+  const sessions = [carrySession("cur", 7, 70), carrySession("a6", 6, 60), carrySession("a5", 5, 50)];
+  const byId = {
+    cur: textMessages("cur", 110000),
+    a6: todoMessages("a6", 60000, [{ content: "perdida", status: "pending" }]),
+    a5: todoMessages("a5", 50000, [{ content: "rescatada", status: "in_progress" }])
+  };
+  const { fetchJson, log } = stubOpenCodeServer({ sessions, byId });
+  const failingFetch = async (url) => {
+    if (url.includes("/session/a6/message")) {
+      log.push(url);
+      throw new Error("HTTP 500");
+    }
+    return fetchJson(url);
+  };
+  const result = await openCodeActivity(
+    { name: "mail-alerts", workdir: CARRY_DIR },
+    { ...CARRY_CTX, fetchJson: failingFetch }
+  );
+
+  assert.equal(result.progress.carried, true);
+  assert.equal(result.progress.current, "rescatada");
+  assert.equal(carryFetches(log, "a6"), 1);
+  assert.equal(carryFetches(log, "a5"), 1);
 });
