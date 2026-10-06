@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   assignLanes,
   branchColor,
+  branchColorIndex,
   collectBranches,
   LANE_COLORS,
   NEUTRAL_BRANCH_COLOR,
@@ -105,6 +106,32 @@ test("branchColor is deterministic per name and stays in the graph palette", () 
   assert.equal(branchColor(null), NEUTRAL_BRANCH_COLOR);
   assert.equal(branchColor(undefined), NEUTRAL_BRANCH_COLOR);
   assert.ok(!LANE_COLORS.includes(NEUTRAL_BRANCH_COLOR));
+});
+
+test("branchColorIndex is the palette slot branchColor maps to, -1 for neutral", () => {
+  for (const name of ["main", "feature", "feat/monitor-orch", "example-web", "x"]) {
+    const index = branchColorIndex(name);
+    assert.equal(LANE_COLORS[index], branchColor(name), `${name} keeps its slot`);
+  }
+  assert.equal(branchColorIndex(""), -1);
+  assert.equal(branchColorIndex("   "), -1);
+  assert.equal(branchColorIndex(null), -1);
+  assert.equal(branchColorIndex(undefined), -1);
+});
+
+test("assignLanes carries the palette index next to every lane colour", () => {
+  const rows = assignLanes(parseGitLog(read("git-log-merge.txt")));
+  const [merge, feature] = rows;
+  assert.equal(merge.laneColorIndexes[0], branchColorIndex("main"));
+  // The lane has no ref yet on the merge row, so it falls back to its own
+  // position in the palette (the same slot laneColors uses).
+  assert.equal(merge.laneColorIndexes[1], 1);
+  assert.equal(feature.laneColorIndexes[1], branchColorIndex("feature"));
+  for (const row of rows) {
+    row.laneColorIndexes.forEach((index, lane) => {
+      assert.equal(LANE_COLORS[index], row.laneColors[lane]);
+    });
+  }
 });
 
 test("each graph lane takes the colour of the branch it carries", () => {

@@ -21,7 +21,7 @@ import {
   modelLabel,
   workerStateKind
 } from "./format.mjs";
-import { assignLanes, branchColor, collectBranches, NEUTRAL_BRANCH_COLOR, parseGitLog } from "./graph.mjs";
+import { assignLanes, branchColor, branchColorIndex, collectBranches, NEUTRAL_BRANCH_COLOR, parseGitLog } from "./graph.mjs";
 import { enrichSnapshot } from "./translate.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -404,12 +404,16 @@ async function gitLastCommit(repo, branch) {
 }
 
 // Branch colour shown next to every worker model, from the very palette the
-// git tree uses per lane. Exported for the tests.
+// git tree uses per lane. The index lets the page use the theme variables
+// (`--branch-<index>`, -1 for the neutral token) and fall back to the hex.
+// Exported for the tests.
 export function applyBranchColors(workers, git) {
   const visible = new Set(git?.branches ?? []);
   for (const worker of workers ?? []) {
     const branch = String(worker?.branch ?? "");
-    worker.branchColor = branch && visible.has(branch) ? branchColor(branch) : NEUTRAL_BRANCH_COLOR;
+    const known = Boolean(branch) && visible.has(branch);
+    worker.branchColor = known ? branchColor(branch) : NEUTRAL_BRANCH_COLOR;
+    worker.branchColorIndex = known ? branchColorIndex(branch) : -1;
   }
   return workers;
 }
