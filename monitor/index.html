@@ -1347,6 +1347,7 @@
         text.textContent += " · " + progress.current;
         text.title = progress.current;
       }
+      if (progress.carried) text.textContent += " (intento anterior)";
       row.appendChild(text);
       if (worker.pace) row.appendChild(el("span", "chip pace-" + paceSlug(worker.pace), worker.pace));
     }

@@ -161,6 +161,9 @@ test("the card shows the todo progress as a segmented bar with pace and idle chi
   assert.match(html, /Math\.min\(progress\.items\.length, 30\)/);
   assert.match(html, /"progress-seg " \+ progressSliceStatus\(progress\.items, i, slices\)/);
   assert.match(html, /text\.textContent \+= " · " \+ progress\.current/);
+  // A list carried from a previous attempt of the same track says so in the
+  // same dim text, still through textContent only.
+  assert.match(html, /if \(progress\.carried\) text\.textContent \+= " \(intento anterior\)"/);
   assert.match(html, /"chip pace-" \+ paceSlug\(worker\.pace\), worker\.pace/);
   assert.match(html, /"progress-idle", worker\.idleText/);
   assert.match(html, /var progress = progressRow\(worker\)/);
