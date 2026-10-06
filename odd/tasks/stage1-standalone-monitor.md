@@ -31,7 +31,7 @@ The monitor lives inside the FlotaGrupo repo and is wired to its autopilot kit. 
 ## Tasks
 
 - [x] **T1 — Import and launch** (route: inline, mechanical copy; no delegation trigger: no new design, no non-trivial authored files). `git init`, copy the monitor without its local cache/config, local config pointing at this repo, run tests, launch on `:4202`.
-- [ ] **T2 — Multi-project selector** (route: delegated, DeepSeek builder; writer trigger: server + UI + tests). Monitor config gets a `projects` list (name, repo, kitConfig); header dropdown switches the project; server serves the selected project's state; tests cover selection.
+- [x] **T2 — Multi-project selector** (route: delegated, DeepSeek builder; writer trigger: server + UI + tests). Monitor config gets a `projects` list (name, repo, kitConfig); header dropdown switches the project; server serves the selected project's state; tests cover selection.
 
 ## Progress / evidence
 
@@ -42,6 +42,10 @@ The monitor lives inside the FlotaGrupo repo and is wired to its autopilot kit. 
 - T2 builder finished (exit 0): commits `ca3ab77` (backend + tests) and `01c6691` (header selector + docs) on `builder/monitor-projects`; 9 files, +426/-22. `node --test` re-run by Claude in the worktree: 114 pass, 0 fail. Builder also ran a two-project HTTP smoke test (no cache bleed, unknown id → 404). Claude read the backend and client diff: matches the brief; `lib/translate.mjs` was touched only to key worker summaries by project id (in the spirit of "no cross-project data"). `.atl/` added to the repo's `info/exclude`.
 - T2 RDD: `gentle-ai review assess` → medium, `review_due=true` (`slice_budget_reached`, 448 lines). START returned the consent envelope; the user chose to turn RDD off for now (`gentle-ai review mode disable` → global off, 2026-10-05). No native review for T2; verification of record = builder tests + Claude re-run (114/114) + Claude diff read. Merge into `main` still waits for the user's OK.
 - Side track (not a task of this feature): LongCat research "live view of the files an agent touches" dispatched 2026-10-05 ~21:04, brief `.korsakov/research/live-file-view/brief.md`, report to `.korsakov/runs/research-live-file-view.report.md`, then to `docs/investigaciones/13-vista-en-vivo-de-archivos.md`.
+
+- T2 merged into `main` as `2ae4835` (user OK + permissions, 2026-10-05). `node --test` on main: 114/114. Monitor restarted hidden without opening a tab (`node server.mjs .korsakov/monitor.config.json`). Local config now lists two projects: `korsakov` and `flota` (FlotaGrupo repo + its autopilot kit).
+- Fix: `~/.claude/quota/claude-usage.json` had a UTF-8 BOM (written by `Set-Content -Encoding utf8` in PowerShell 5.1), so the monitor showed "no se pudo leer claude-usage.json". Rewritten without BOM. Always write that file BOM-less.
+- Experiment (uncommitted, waiting for the user's verdict): film-style typography — `h1` in Times capitals, wide tracking, sliced by horizontal lines; digital rain with mirrored half-width katakana + digits.
 
 ## Next step
 
