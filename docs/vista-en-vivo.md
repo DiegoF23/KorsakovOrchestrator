@@ -7,6 +7,15 @@ Requisitos acordados con el usuario el 2026-10-05. Base técnica: [investigacion
 1. **Mapa dibujado** de carpetas y archivos que el agente toca, con el estado de cada uno: leído, editado, creado, borrado.
 2. **Panel desplegado** al elegir un elemento, que se adapta a lo que el agente produjo.
 
+## Principio
+
+Lo más informativo posible del paso a paso de la IA. Cada herramienta que usa el agente se reproduce en pantalla en orden, animada (simulada, como Roo Code) o en vivo cuando el agente lo permita.
+
+## Ventanas y pestañas
+
+- Cada elemento abierto es una ventana desplegable que se puede **plegar** para esconderla.
+- Las pestañas llevan el nombre (archivo, comando, memoria) y **cambian de color según el estado**, igual que las tarjetas del monitor actual (trabajando, terminado, detenido).
+
 ## Visores por tipo
 
 | Tipo | Cómo se muestra |
@@ -14,7 +23,9 @@ Requisitos acordados con el usuario el 2026-10-05. Base técnica: [investigacion
 | Código y texto | Hoja con resaltado (Prism); el contenido aparece como si se tipeara. Una edición se muestra como cambio (antes → después). |
 | Imagen (png, jpg, gif, webp, svg) | Vista previa de la imagen. |
 | Video (mp4, webm) | Reproductor. |
-| Terminal (comandos) | Panel tipo consola: el comando y su salida, con colores ANSI. |
+| Terminal (comandos) | Mini terminal: el comando se tipea y la salida se va escribiendo, con colores ANSI. |
+| Memoria (Engram: `mem_save`, `mem_search`, etc.) | Ficha de memoria: título, tipo y contenido guardado, escribiéndose; en búsquedas, la consulta y los resultados. |
+| Otras herramientas (MCP, web, subagentes) | Nombre de la herramienta, sus parámetros y la respuesta resumida. |
 | PDF | Visor embebido del navegador. |
 | Otros binarios o archivos muy grandes | Ficha con nombre, tamaño y tipo; sin contenido. |
 
