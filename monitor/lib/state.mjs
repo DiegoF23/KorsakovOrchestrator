@@ -396,7 +396,7 @@ export function recentAgyConversations(brainDir, project, now = new Date(), opti
     if (found.length >= max) break;
     const head = readFileHead(transcript.file, AGY_BRAIN_HEAD_BYTES);
     if (head === null || !mentionsAnyPath(head, needles)) continue;
-    found.push({ ...transcript, title: agyConversationTitle(head) });
+    found.push({ ...transcript, title: agyConversationTitle(head), model: agyConversationModel(head) });
   }
   return found;
 }
@@ -421,6 +421,14 @@ function mentionsAnyPath(text, needles) {
   if (needles.length === 0) return false;
   const haystack = normalizeMatchPath(text);
   return needles.some((needle) => haystack.includes(needle));
+}
+
+// The model a conversation runs with: agy records the selection in the first
+// USER_INPUT ("The user changed setting `Model Selection` from None to
+// Gemini 3.8 Flash (High)."). Null when the head does not say.
+export function agyConversationModel(head) {
+  const match = /Model Selection`? from [^\n]*? to ([^\n]+?)\.(?:\s|\\n|$)/.exec(String(head ?? ""));
+  return match ? match[1].trim() : null;
 }
 
 // First line of the first USER_INPUT, without the wrapping XML tags and a
@@ -542,6 +550,8 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       engine: "antigravity",
       title: conversation.title,
       label: "Gemini · Antigravity",
+      // Never fall back to the orchestrator's model: an unknown one reads "Antigravity".
+      model: conversation.model ?? "Antigravity",
       workdir: project.repo,
       activityFile: conversation.file,
       activityFormat: "brain",

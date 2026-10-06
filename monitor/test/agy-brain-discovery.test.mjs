@@ -152,7 +152,7 @@ test("discovered conversations become synthetic Antigravity cards", () => {
   assert.equal(fresh.activityFormat, "brain");
   assert.equal(fresh.__state, "working");
   assert.equal(fresh.__statusTime, new Date(NOW.getTime() - 60000).toISOString());
-  assert.equal(fresh.model, undefined, "no model is guessed for a discovered run");
+  assert.equal(fresh.model, "Antigravity", "without a recorded model selection the card never borrows the orchestrator's model");
   assert.equal(out.tracks[1].__state, "done");
   assert.equal(kit.tracks.length, 1, "the kit itself is never modified");
 });
@@ -205,4 +205,11 @@ test("a brain track feeds the card and the live view through the state builders"
   const result = await buildWorkerSteps(config, { project, worker: "agy-brain-a", now: NOW });
   assert.equal(result.engine, "antigravity");
   assert.ok(result.steps.some((step) => step.type === "memory"));
+});
+
+test("a discovered agy conversation names the model it runs with", async () => {
+  const { agyConversationModel } = await import("../lib/state.mjs");
+  const line = JSON.stringify({ type: "USER_INPUT", content: "<USER_SETTINGS_CHANGE>\nThe user changed setting `Model Selection` from None to Gemini 3.8 Flash (High). No need to comment.\n</USER_SETTINGS_CHANGE>" });
+  assert.equal(agyConversationModel(line), "Gemini 3.8 Flash (High)");
+  assert.equal(agyConversationModel("{}"), null);
 });
