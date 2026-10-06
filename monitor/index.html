@@ -491,6 +491,42 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* Todo-list progress of a worker: a thin segmented bar (one segment per
+     item, up to 30; beyond that each segment is an equal slice of the list),
+     the done/total count with the current item, the pace chip and the "sin
+     movimiento" warning. The fixed height keeps the card from jumping when the
+     row first appears. */
+  .worker-progress {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 14px;
+    margin-top: 2px;
+    min-width: 0;
+    font-size: 10.5px;
+  }
+  .progress-bar {
+    flex: 0 0 auto;
+    display: inline-flex;
+    gap: 1px;
+    width: 110px;
+    height: 7px;
+  }
+  .progress-seg {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid rgba(var(--dim-rgb), 0.55);
+    border-radius: 1px;
+  }
+  .progress-seg.done { background: var(--live); border-color: var(--live); }
+  .progress-seg.doing { background: var(--work); border-color: var(--work); }
+  .worker.state-working .progress-seg.doing { animation: progress-pulse 1.6s ease-in-out infinite; }
+  @keyframes progress-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  .progress-text { min-width: 0; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pace-adelantado { color: var(--wait); }
+  .pace-en-hora { color: var(--live); }
+  .pace-demorado { color: var(--warn); }
+  .progress-idle { flex: 0 0 auto; color: var(--warn); }
   .events { list-style: none; margin: 3px 0 0; padding: 0; }
   .event {
     display: grid;
@@ -909,6 +945,7 @@
     * { animation: none !important; transition: none !important; }
     .worker.state-done::before,
     .worker.state-error::before { display: none; }
+    .worker.state-working .progress-seg.doing { animation: none; }
     .worker.state-done { box-shadow: var(--glow-done-static); }
     .worker.state-error { box-shadow: var(--glow-error-static); }
   }
@@ -1264,6 +1301,59 @@
     return item;
   }
 
+  // One segment per item (up to 30 slices; above that each segment stands for
+  // an equal slice of the list). A slice is "doing" when any of its items is
+  // doing and "done" only when all of them are done.
+  function progressSliceStatus(items, index, slices) {
+    if (items.length <= slices) return items[index].status;
+    var start = Math.floor((index * items.length) / slices);
+    var end = Math.max(start + 1, Math.floor(((index + 1) * items.length) / slices));
+    var status = "done";
+    for (var i = start; i < end; i++) {
+      var item = items[i].status;
+      if (item === "doing") return "doing";
+      if (item === "todo") status = "todo";
+    }
+    return status;
+  }
+
+  function progressBar(progress) {
+    var slices = Math.min(progress.items.length, 30);
+    var box = el("span", "progress-bar");
+    box.setAttribute("role", "img");
+    box.setAttribute("aria-label", progress.done + " de " + progress.total + " tareas hechas");
+    for (var i = 0; i < slices; i++) {
+      box.appendChild(el("span", "progress-seg " + progressSliceStatus(progress.items, i, slices)));
+    }
+    return box;
+  }
+
+  function paceSlug(pace) {
+    return String(pace).trim().toLowerCase().replace(/\s+/g, "-");
+  }
+
+  // The progress row exists only when there is something to say: the agent's
+  // todo list and/or the "sin movimiento" warning of a working builder. Cards
+  // without progress show nothing extra.
+  function progressRow(worker) {
+    var progress = worker.progress;
+    var hasProgress = Boolean(progress && progress.total > 0);
+    if (!hasProgress && !worker.idleText) return null;
+    var row = el("div", "worker-progress");
+    if (hasProgress) {
+      row.appendChild(progressBar(progress));
+      var text = el("span", "progress-text", progress.done + "/" + progress.total);
+      if (progress.current) {
+        text.textContent += " · " + progress.current;
+        text.title = progress.current;
+      }
+      row.appendChild(text);
+      if (worker.pace) row.appendChild(el("span", "chip pace-" + paceSlug(worker.pace), worker.pace));
+    }
+    if (worker.idleText) row.appendChild(el("span", "progress-idle", worker.idleText));
+    return row;
+  }
+
   function workerCard(worker, activityLines, hiddenCard) {
     var kind = worker.stateKind || worker.state;
     var card = el("article", "worker state-" + kind + (hiddenCard ? " worker-hidden" : ""));
@@ -1273,6 +1363,9 @@
     if (worker.shortTitle) head.appendChild(el("span", "task", worker.shortTitle));
     if (worker.remaining) head.appendChild(el("span", "eta", worker.remaining));
     card.appendChild(head);
+
+    var progress = progressRow(worker);
+    if (progress) card.appendChild(progress);
 
     if (worker.summaryEs) {
       var summary = el("div", "worker-summary", worker.summaryEs);

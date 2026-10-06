@@ -22,6 +22,7 @@ import {
   workerStateKind
 } from "./format.mjs";
 import { assignLanes, branchColor, branchColorIndex, collectBranches, NEUTRAL_BRANCH_COLOR, parseGitLog } from "./graph.mjs";
+import { idleText, progressPace } from "./progress.mjs";
 import { enrichSnapshot } from "./translate.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -482,7 +483,7 @@ async function buildWorker(track, ctx) {
   const engine = status?.engine || track.engine || "opencode";
   const adapter = ADAPTERS[ENGINE_TO_ADAPTER[engine] ?? "opencode"];
   const evidenceText = workdir && track.evidence ? readText(joinFrom(workdir, String(track.evidence))) : null;
-  const remaining = resolveRemainingText({
+  const fallbackRemaining = resolveRemainingText({
     status,
     evidenceText,
     prefix: track.prefix,
@@ -505,11 +506,27 @@ async function buildWorker(track, ctx) {
     gitLastCommit(ctx.repo, branch)
   ]);
 
+  // The agent's own todo list, when it has one, replaces the guessed etaEnd
+  // with a measured remaining time; the status/evidence text stays as the
+  // fallback for workers without a list.
+  const progress = activity.progress ?? null;
+  const lastStepAt = activity.lastStepAt ?? null;
+  const { remainingText: remaining, pace } = progressPace({
+    progress,
+    etaEnd: track.etaEnd,
+    now: ctx.now,
+    fallbackText: fallbackRemaining
+  });
+
   return {
     name,
     identity,
     shortTitle,
     remaining,
+    pace,
+    progress,
+    lastStepAt,
+    idleText: stateKind === "working" ? idleText({ lastStepAt, now: ctx.now }) : null,
     title: builderTitle(identity, shortTitle, remaining),
     engine,
     state,

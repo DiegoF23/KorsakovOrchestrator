@@ -100,6 +100,31 @@ más de la grilla cuando ese espacio se achica demasiado (ver el punto 4).
 
 No hay sección "Ramas activas".
 
+## Avance de los constructores
+
+Cada pista cuyo agente mantiene una lista de tareas (OpenCode `todowrite`,
+Claude Code `TodoWrite`, Codex `update_plan`) muestra debajo del título una
+**barra segmentada**: un segmento por ítem (hasta 30; con más, cada segmento
+representa una porción igual de la lista), lleno si está hecho, lleno con un
+pulso lento si está en curso y solo con contorno si está pendiente. Al lado va
+`hechos/total · ítem en curso`, el chip de **ritmo** y, cuando corresponde, el
+aviso de inmovilidad. Los ítems cancelados no cuentan.
+
+- **Ritmo** (`en hora`, `adelantado` o `demorado`): compara la hora de fin
+  proyectada con el `etaEnd` de la pista, con una tolerancia del 10 % del tiempo
+  planeado. La proyección sale del ritmo medido desde el primer llamado a la
+  lista (`restante = transcurrido × pendientes / hechos`). Sin `etaEnd` no hay
+  chip.
+- **Sin movimiento hace N min**: aparece cuando la pista está trabajando y su
+  último paso tiene 5 minutos o más.
+
+El tiempo restante del título deja de ser el `~H:MM` adivinado al lanzar cuando
+hay lista: pasa a ser el medido (`~m:ss` bajo una hora, `~h:mm h` encima) y
+`listo` cuando la lista terminó. Sin lista se mantiene el cálculo anterior con
+`etaEnd` y la evidencia. Todo sale de los mismos registros que la tarjeta ya
+lee (mensajes de OpenCode, transcripción de Claude, log de Codex o la fecha del
+archivo de Antigravity): no agrega pedidos ni lecturas.
+
 ## Tipografía
 
 Los títulos (título de la página, encabezados de sección y títulos de las

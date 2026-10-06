@@ -142,6 +142,31 @@ test("working builders show their Spanish summary under the title", () => {
   assert.match(html, /summary\.title = worker\.summaryEs/);
 });
 
+test("the card shows the todo progress as a segmented bar with pace and idle chips", () => {
+  // A fixed-height row keeps the card from jumping when it first appears, and
+  // every colour comes from a theme token.
+  assert.match(html, /\.worker-progress\s*\{[^}]*height:\s*14px/);
+  assert.match(html, /\.progress-bar\s*\{[^}]*height:\s*7px/);
+  assert.match(html, /\.progress-seg\s*\{[^}]*border:\s*1px solid rgba\(var\(--dim-rgb\), 0\.55\)/);
+  assert.match(html, /\.progress-seg\.done\s*\{[^}]*background:\s*var\(--live\)/);
+  assert.match(html, /\.progress-seg\.doing\s*\{[^}]*background:\s*var\(--work\)/);
+  assert.match(html, /\.worker\.state-working \.progress-seg\.doing\s*\{[^}]*animation:\s*progress-pulse/);
+  assert.match(html, /@keyframes progress-pulse/);
+  assert.match(html, /prefers-reduced-motion: reduce[\s\S]*\.worker\.state-working \.progress-seg\.doing\s*\{[^}]*animation:\s*none/);
+  assert.match(html, /\.pace-adelantado\s*\{[^}]*color:\s*var\(--wait\)/);
+  assert.match(html, /\.pace-en-hora\s*\{[^}]*color:\s*var\(--live\)/);
+  assert.match(html, /\.pace-demorado\s*\{[^}]*color:\s*var\(--warn\)/);
+  assert.match(html, /\.progress-idle\s*\{[^}]*color:\s*var\(--warn\)/);
+  // At most 30 segments; above that one segment per equal slice of the list.
+  assert.match(html, /Math\.min\(progress\.items\.length, 30\)/);
+  assert.match(html, /"progress-seg " \+ progressSliceStatus\(progress\.items, i, slices\)/);
+  assert.match(html, /text\.textContent \+= " · " \+ progress\.current/);
+  assert.match(html, /"chip pace-" \+ paceSlug\(worker\.pace\), worker\.pace/);
+  assert.match(html, /"progress-idle", worker\.idleText/);
+  assert.match(html, /var progress = progressRow\(worker\)/);
+  assert.doesNotMatch(html, /innerHTML/);
+});
+
 function loadGitCardMode() {
   const block = html.match(/<script id="git-layout-logic">([\s\S]*?)<\/script>/);
   assert.ok(block, "the pure git layout logic lives in its own script block");

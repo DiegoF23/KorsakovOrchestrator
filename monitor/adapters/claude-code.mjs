@@ -8,6 +8,7 @@
 import fs from "node:fs";
 
 import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { buildProgress, withActivityProgress } from "../lib/progress.mjs";
 import { capStep, commandStep, lastSteps, memoryAction, memoryStep, numberOrNull, toolTitle } from "../lib/steps.mjs";
 
 export const id = "claude";
@@ -374,12 +375,41 @@ function claudeExitCode(result) {
   return match ? Number(match[1]) : null;
 }
 
+// The transcript's `TodoWrite` tool calls are the checklist the agent keeps.
+// The latest call wins; the first one dates the planning. Pure; exported for
+// tests. A block whose tool_result has not arrived yet already carries the
+// input, so a live list shows up as soon as it is written.
+export function progressFromEntries(entries) {
+  let firstAt = null;
+  let latest = null;
+  let lastStepAt = null;
+  for (const entry of entries ?? []) {
+    const time = entryTime(entry?.timestamp);
+    if (time && (!lastStepAt || time > lastStepAt)) lastStepAt = time;
+    const content = entry?.message?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part?.type !== "tool_use" || String(part.name ?? "").toLowerCase() !== "todowrite") continue;
+      const todos = part.input?.todos;
+      if (!Array.isArray(todos)) continue;
+      if (!firstAt) firstAt = time;
+      latest = { todos };
+    }
+  }
+  return {
+    progress: latest ? buildProgress({ todos: latest.todos, firstAt, lastStepAt }) : null,
+    lastStepAt
+  };
+}
+
 export async function activity(worker, ctx = {}) {
   const file = worker?.activityFile;
   if (!file) return { events: [], notice: "sin actividad visible" };
   try {
-    const events = mapClaudeEntries(parseJsonlTail(readFileTail(file)), ctx);
-    return { events, notice: events.length ? null : "sin actividad visible" };
+    const entries = parseJsonlTail(readFileTail(file));
+    const events = mapClaudeEntries(entries, ctx);
+    const { progress, lastStepAt } = progressFromEntries(entries);
+    return withActivityProgress({ events, notice: events.length ? null : "sin actividad visible" }, progress, lastStepAt);
   } catch {
     return { events: [], notice: "sin actividad visible" };
   }

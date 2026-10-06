@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import { firstSentence, shortPath, shortText } from "../lib/format.mjs";
+import { withActivityProgress } from "../lib/progress.mjs";
 import { capStep, commandStep, hashId, lastSteps, memoryAction, memoryStep, numberOrNull, toolTitle } from "../lib/steps.mjs";
 import { readFileTail, parseJsonlTail } from "./claude-code.mjs";
 
@@ -330,7 +331,11 @@ export async function activity(worker, ctx = {}) {
     // 200-line tail would hold nothing but the answer; the byte cap still bounds it.
     const entries = parseJsonlTail(text, AGY_TAIL_LINES);
     const events = mapAgyEntries(entries, { ...ctx, mtimeMs });
-    return { events, notice: events.length ? null : "sin actividad visible" };
+    // Antigravity keeps no todo list, but its file mtime still dates the
+    // newest step, so the card can warn about a worker that stopped moving.
+    // An unreadable or empty stream carries no step at all.
+    const lastStepAt = entries.length ? new Date(mtimeMs).toISOString() : null;
+    return withActivityProgress({ events, notice: events.length ? null : "sin actividad visible" }, null, lastStepAt);
   } catch {
     return { events: [], notice: "sin actividad visible" };
   }
