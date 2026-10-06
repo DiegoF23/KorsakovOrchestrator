@@ -5,6 +5,21 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; font-src 'self'">
 <title>Monitor</title>
+<script>
+  // Apply the stored theme before the stylesheet renders so the first paint is
+  // already themed. Unknown or missing ids fall back to Matrix; every storage
+  // access is wrapped because the page must work without localStorage.
+  (function () {
+    var ids = ["matrix"];
+    var id = null;
+    try {
+      id = window.localStorage.getItem("fleet-monitor.theme");
+    } catch (error) {
+      id = null;
+    }
+    document.documentElement.setAttribute("data-theme", ids.indexOf(id) === -1 ? "matrix" : id);
+  })();
+</script>
 <style>
   @font-face {
     font-family: "Share Tech Mono";
@@ -18,19 +33,162 @@
     inherits: true;
     initial-value: 0deg;
   }
+  /* Theme tokens. `:root` keeps a Matrix fallback (same values as the Matrix
+     block) so the page never renders unstyled; the Matrix theme lives in
+     `:root[data-theme="matrix"]` and is the block a new theme copies. Every
+     colour, font, glow and background value used below comes from here, and
+     anything used from JavaScript is read back from these computed tokens. */
   :root {
     --bg: #000;
     --card: #030d05;
     --panel: #020a04;
-    --border: rgba(0, 255, 65, 0.32);
     --live: #00ff41;
+    --live-rgb: 0, 255, 65;
     --text: #35e05f;
     --dim: #00a333;
+    --dim-rgb: 0, 163, 51;
     --warn: #ffb000;
+    --warn-rgb: 255, 176, 0;
     --err: #ff5555;
+    --err-rgb: 255, 85, 85;
     --work: #ffc233;
+    --work-rgb: 255, 194, 51;
     --wait: #57d7ff;
+    --wait-rgb: 87, 215, 255;
     --stale: #3f5bd9;
+    --stale-rgb: 111, 134, 255;
+    --border: rgba(var(--live-rgb), 0.32);
+    --on-warn: #000;
+    --on-crit: #fff;
+    --mask-fill: #fff;
+    --scanline: rgba(var(--live-rgb), 0.05);
+    --scrollbar: rgba(var(--dim-rgb), 0.6);
+    --scrollbar-thumb: rgba(var(--dim-rgb), 0.55);
+    --tron-head-rgb: 255, 255, 255;
+    --glow-title: drop-shadow(0 0 6px rgba(var(--live-rgb), 0.55));
+    --glow-live: 0 0 6px rgba(var(--live-rgb), 0.45);
+    --glow-work: 0 0 7px rgba(var(--work-rgb), 0.5);
+    --glow-done: 0 0 7px rgba(var(--live-rgb), 0.45);
+    --glow-error: 0 0 7px rgba(var(--err-rgb), 0.4);
+    --glow-waiting: 0 0 7px rgba(var(--wait-rgb), 0.4);
+    --glow-stale: 0 0 7px rgba(var(--stale-rgb), 0.4);
+    --glow-commit: 0 0 5px rgba(var(--live-rgb), 0.4);
+    --glow-done-static: 0 0 9px rgba(var(--live-rgb), 0.45), inset 0 0 7px rgba(var(--live-rgb), 0.22);
+    --glow-error-static: 0 0 9px rgba(var(--err-rgb), 0.45), inset 0 0 7px rgba(var(--err-rgb), 0.22);
+    --rain-glyph: rgba(var(--live-rgb), 0.85);
+    --rain-trail: rgba(0, 0, 0, 0.08);
+    --rain-font: 15px 'MS Gothic', 'Yu Gothic', monospace;
+    --branch-0: #00ff41;
+    --branch-1: #ffb000;
+    --branch-2: #55aaff;
+    --branch-3: #ff66cc;
+    --branch-4: #9dff4d;
+    --branch-5: #ff5555;
+    --branch-6: #5fe8e8;
+    --branch-7: #c792ea;
+    --branch-neutral: #00a333;
+    --code-bg: #020a04;
+    --code-text: #c9f5d4;
+    --code-keyword: #00ff41;
+    --code-string: #ffb000;
+    --code-comment: #00a333;
+    --code-number: #57d7ff;
+    --code-function: #9dff4d;
+    --code-added-bg: rgba(var(--live-rgb), 0.14);
+    --code-removed-bg: rgba(var(--err-rgb), 0.14);
+    --ansi-0: #0a0f0a;
+    --ansi-1: #ff5555;
+    --ansi-2: #4dff7a;
+    --ansi-3: #ffb000;
+    --ansi-4: #57a7ff;
+    --ansi-5: #c792ea;
+    --ansi-6: #5fe8e8;
+    --ansi-7: #b8e6c2;
+    --ansi-8: #4a6b52;
+    --ansi-9: #ff7777;
+    --ansi-10: #7dffa0;
+    --ansi-11: #ffd066;
+    --ansi-12: #7dbaff;
+    --ansi-13: #ddaaff;
+    --ansi-14: #8ff5f5;
+    --ansi-15: #e6ffe9;
+    --font: "Cascadia Mono", Consolas, "Courier New", monospace;
+    --font-display: "Share Tech Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  :root[data-theme="matrix"] {
+    --bg: #000;
+    --card: #030d05;
+    --panel: #020a04;
+    --live: #00ff41;
+    --live-rgb: 0, 255, 65;
+    --text: #35e05f;
+    --dim: #00a333;
+    --dim-rgb: 0, 163, 51;
+    --warn: #ffb000;
+    --warn-rgb: 255, 176, 0;
+    --err: #ff5555;
+    --err-rgb: 255, 85, 85;
+    --work: #ffc233;
+    --work-rgb: 255, 194, 51;
+    --wait: #57d7ff;
+    --wait-rgb: 87, 215, 255;
+    --stale: #3f5bd9;
+    --stale-rgb: 111, 134, 255;
+    --border: rgba(var(--live-rgb), 0.32);
+    --on-warn: #000;
+    --on-crit: #fff;
+    --mask-fill: #fff;
+    --scanline: rgba(var(--live-rgb), 0.05);
+    --scrollbar: rgba(var(--dim-rgb), 0.6);
+    --scrollbar-thumb: rgba(var(--dim-rgb), 0.55);
+    --tron-head-rgb: 255, 255, 255;
+    --glow-title: drop-shadow(0 0 6px rgba(var(--live-rgb), 0.55));
+    --glow-live: 0 0 6px rgba(var(--live-rgb), 0.45);
+    --glow-work: 0 0 7px rgba(var(--work-rgb), 0.5);
+    --glow-done: 0 0 7px rgba(var(--live-rgb), 0.45);
+    --glow-error: 0 0 7px rgba(var(--err-rgb), 0.4);
+    --glow-waiting: 0 0 7px rgba(var(--wait-rgb), 0.4);
+    --glow-stale: 0 0 7px rgba(var(--stale-rgb), 0.4);
+    --glow-commit: 0 0 5px rgba(var(--live-rgb), 0.4);
+    --glow-done-static: 0 0 9px rgba(var(--live-rgb), 0.45), inset 0 0 7px rgba(var(--live-rgb), 0.22);
+    --glow-error-static: 0 0 9px rgba(var(--err-rgb), 0.45), inset 0 0 7px rgba(var(--err-rgb), 0.22);
+    --rain-glyph: rgba(var(--live-rgb), 0.85);
+    --rain-trail: rgba(0, 0, 0, 0.08);
+    --rain-font: 15px 'MS Gothic', 'Yu Gothic', monospace;
+    --branch-0: #00ff41;
+    --branch-1: #ffb000;
+    --branch-2: #55aaff;
+    --branch-3: #ff66cc;
+    --branch-4: #9dff4d;
+    --branch-5: #ff5555;
+    --branch-6: #5fe8e8;
+    --branch-7: #c792ea;
+    --branch-neutral: #00a333;
+    --code-bg: #020a04;
+    --code-text: #c9f5d4;
+    --code-keyword: #00ff41;
+    --code-string: #ffb000;
+    --code-comment: #00a333;
+    --code-number: #57d7ff;
+    --code-function: #9dff4d;
+    --code-added-bg: rgba(var(--live-rgb), 0.14);
+    --code-removed-bg: rgba(var(--err-rgb), 0.14);
+    --ansi-0: #0a0f0a;
+    --ansi-1: #ff5555;
+    --ansi-2: #4dff7a;
+    --ansi-3: #ffb000;
+    --ansi-4: #57a7ff;
+    --ansi-5: #c792ea;
+    --ansi-6: #5fe8e8;
+    --ansi-7: #b8e6c2;
+    --ansi-8: #4a6b52;
+    --ansi-9: #ff7777;
+    --ansi-10: #7dffa0;
+    --ansi-11: #ffd066;
+    --ansi-12: #7dbaff;
+    --ansi-13: #ddaaff;
+    --ansi-14: #8ff5f5;
+    --ansi-15: #e6ffe9;
     --font: "Cascadia Mono", Consolas, "Courier New", monospace;
     --font-display: "Share Tech Mono", "Cascadia Mono", Consolas, monospace;
   }
@@ -49,7 +207,7 @@
     inset: 0;
     pointer-events: none;
     z-index: 3;
-    background: repeating-linear-gradient(0deg, rgba(0, 255, 65, 0.05) 0 1px, transparent 1px 3px);
+    background: repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 3px);
   }
   #rain {
     position: fixed;
@@ -99,14 +257,14 @@
     background: repeating-linear-gradient(to bottom, var(--live) 0 3px, transparent 3px 4px);
     -webkit-background-clip: text;
     background-clip: text;
-    filter: drop-shadow(0 0 6px rgba(0, 255, 65, 0.55));
+    filter: var(--glow-title);
   }
   .dim { color: var(--dim); }
   .warn { color: var(--warn); }
   .err { color: var(--err); }
   .stamp { color: var(--dim); font-size: 11px; }
   .link { font-size: 11px; }
-  .link-up { color: var(--live); text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
+  .link-up { color: var(--live); text-shadow: var(--glow-live); }
   .link-down { color: var(--warn); }
   /* Project picker: same palette as the rest of the header, compact enough to
      share the top line with the title and the meters. */
@@ -124,8 +282,24 @@
     letter-spacing: 1px;
   }
   .project-picker select:hover { border-color: var(--live); }
+  .theme-picker select { max-width: 140px; }
+  /* Background switch: same compact style as the pickers, with the on/off
+     state readable from the label itself and from aria-pressed. */
+  .bg-toggle {
+    background: var(--panel);
+    color: var(--live);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-family: var(--font-display);
+    font-size: 12px;
+    letter-spacing: 1px;
+    cursor: pointer;
+  }
+  .bg-toggle:hover { border-color: var(--live); }
+  .bg-toggle[aria-pressed="false"] { color: var(--dim); }
   .orch { display: inline-flex; align-items: baseline; gap: 6px; min-width: 0; }
-  .orch-engine { color: var(--live); font-size: 13px; text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
+  .orch-engine { color: var(--live); font-size: 13px; text-shadow: var(--glow-live); }
   .orch-model { color: var(--text); font-size: 12px; overflow-wrap: anywhere; }
   .usage { display: grid; gap: 3px; min-width: 0; }
   .usage-row { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11.5px; white-space: nowrap; overflow: hidden; }
@@ -136,9 +310,9 @@
   .usage-reset { color: var(--dim); }
   .usage-age { margin-left: auto; color: var(--dim); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; }
   .bar { display: inline-flex; gap: 1px; }
-  .seg { width: 7px; height: 13px; background: rgba(0, 255, 65, 0.12); }
-  .bar-warn .seg { background: rgba(255, 176, 0, 0.14); }
-  .bar-crit .seg { background: rgba(255, 85, 85, 0.14); }
+  .seg { width: 7px; height: 13px; background: rgba(var(--live-rgb), 0.12); }
+  .bar-warn .seg { background: rgba(var(--warn-rgb), 0.14); }
+  .bar-crit .seg { background: rgba(var(--err-rgb), 0.14); }
   .bar-ok .seg-on { background: var(--live); }
   .bar-warn .seg-on { background: var(--warn); }
   .bar-crit .seg-on { background: var(--err); }
@@ -150,8 +324,8 @@
   .pc-value.pc-warn { color: var(--warn); }
   .pc-value.pc-crit { color: var(--err); }
   /* Warning and critical meters read as filled chips, like the terminal board. */
-  .pc-item:has(.pc-warn) { background: var(--warn); color: #000; padding: 0 5px; }
-  .pc-item:has(.pc-crit) { background: var(--err); color: #fff; padding: 0 5px; animation: crit-blink 1.2s steps(2, jump-none) infinite; }
+  .pc-item:has(.pc-warn) { background: var(--warn); color: var(--on-warn); padding: 0 5px; }
+  .pc-item:has(.pc-crit) { background: var(--err); color: var(--on-crit); padding: 0 5px; animation: crit-blink 1.2s steps(2, jump-none) infinite; }
   .pc-item:has(.pc-warn) .pc-value,
   .pc-item:has(.pc-crit) .pc-value { color: inherit; animation: none; }
   /* Critical PC and usage meters blink slowly (about once a second) to flag urgency. */
@@ -176,7 +350,7 @@
     letter-spacing: 1px;
     text-transform: uppercase;
     color: var(--live);
-    text-shadow: 0 0 6px rgba(0, 255, 65, 0.45);
+    text-shadow: var(--glow-live);
   }
   /* The hidden-cards note is a real button, but it stays as discreet as the
      dim text it replaced. */
@@ -210,11 +384,11 @@
     background: var(--panel);
     padding: 5px 8px;
   }
-  .worker.state-working { border-color: rgba(255, 194, 51, 0.5); }
-  .worker.state-done { border-color: rgba(0, 255, 65, 0.55); --tron-rgb: 0, 255, 65; }
-  .worker.state-error { border-color: rgba(255, 85, 85, 0.6); --tron-rgb: 255, 85, 85; }
-  .worker.state-waiting { border-color: rgba(87, 215, 255, 0.5); }
-  .worker.state-stale { border-color: rgba(111, 134, 255, 0.55); }
+  .worker.state-working { border-color: rgba(var(--work-rgb), 0.5); }
+  .worker.state-done { border-color: rgba(var(--live-rgb), 0.55); --tron-rgb: var(--live-rgb); }
+  .worker.state-error { border-color: rgba(var(--err-rgb), 0.6); --tron-rgb: var(--err-rgb); }
+  .worker.state-waiting { border-color: rgba(var(--wait-rgb), 0.5); }
+  .worker.state-stale { border-color: rgba(var(--stale-rgb), 0.55); }
   .worker-head {
     display: flex;
     align-items: baseline;
@@ -228,19 +402,19 @@
   .worker-head .eta { color: var(--dim); margin-left: auto; font-size: 14px; }
   .state-working .identity,
   .state-working .task,
-  .state-working .eta { color: var(--work); text-shadow: 0 0 7px rgba(255, 194, 51, 0.5); }
+  .state-working .eta { color: var(--work); text-shadow: var(--glow-work); }
   .state-done .identity,
   .state-done .task,
-  .state-done .eta { color: var(--live); text-shadow: 0 0 7px rgba(0, 255, 65, 0.45); }
+  .state-done .eta { color: var(--live); text-shadow: var(--glow-done); }
   .state-error .identity,
-  .state-error .task { color: var(--err); text-shadow: 0 0 7px rgba(255, 85, 85, 0.4); }
+  .state-error .task { color: var(--err); text-shadow: var(--glow-error); }
   .state-error .eta { color: var(--err); text-shadow: none; }
   .state-waiting .identity,
   .state-waiting .task,
-  .state-waiting .eta { color: var(--wait); text-shadow: 0 0 7px rgba(87, 215, 255, 0.4); }
+  .state-waiting .eta { color: var(--wait); text-shadow: var(--glow-waiting); }
   .state-stale .identity,
   .state-stale .task,
-  .state-stale .eta { color: var(--stale); text-shadow: 0 0 7px rgba(111, 134, 255, 0.4); }
+  .state-stale .eta { color: var(--stale); text-shadow: var(--glow-stale); }
   /* Tron border: a bright head runs around the card border followed by a short
      trail of dots. Finished (green) and error (red) cards only; reduced motion
      swaps it for a static glow. */
@@ -254,7 +428,7 @@
     padding: 1.4px;
     pointer-events: none;
     background: conic-gradient(from var(--tron-angle),
-      rgba(255, 255, 255, 0.92) 0deg 1.4deg,
+      rgba(var(--tron-head-rgb), 0.92) 0deg 1.4deg,
       rgba(var(--tron-rgb), 0.95) 1.4deg 5.6deg,
       transparent 5.6deg 8deg,
       rgba(var(--tron-rgb), 0.55) 8deg 10.4deg,
@@ -265,9 +439,9 @@
       transparent 18.8deg 21deg,
       rgba(var(--tron-rgb), 0.17) 21deg 22.2deg,
       transparent 22.2deg 360deg);
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask: linear-gradient(var(--mask-fill) 0 0) content-box, linear-gradient(var(--mask-fill) 0 0);
     -webkit-mask-composite: xor;
-    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(var(--mask-fill) 0 0) content-box, linear-gradient(var(--mask-fill) 0 0);
     mask-composite: exclude;
     animation: tron-border 3.8s linear infinite;
   }
@@ -328,7 +502,7 @@
   .event .ts, .event .kind { color: var(--dim); }
   .event .detail { color: var(--text); }
   .event.kind-ERR .kind, .event.kind-ERR .detail { color: var(--err); }
-  .event.kind-COMMIT .kind, .event.kind-COMMIT .detail { color: var(--live); text-shadow: 0 0 5px rgba(0, 255, 65, 0.4); }
+  .event.kind-COMMIT .kind, .event.kind-COMMIT .detail { color: var(--live); text-shadow: var(--glow-commit); }
   /* The tree takes every free pixel below the worker cards (at least 32vh), with
      its own scrollbar so the 200-commit history is browsable while the page never scrolls. */
   .git {
@@ -350,7 +524,7 @@
     letter-spacing: 1px;
     text-transform: uppercase;
     color: var(--live);
-    text-shadow: 0 0 6px rgba(0, 255, 65, 0.45);
+    text-shadow: var(--glow-live);
   }
   .git-body {
     position: relative;
@@ -359,11 +533,11 @@
     overflow-y: auto;
     overflow-x: hidden;
     scrollbar-width: thin;
-    scrollbar-color: rgba(0, 163, 51, 0.6) transparent;
+    scrollbar-color: var(--scrollbar) transparent;
   }
   .git-body::-webkit-scrollbar { width: 9px; }
   .git-body::-webkit-scrollbar-track { background: transparent; }
-  .git-body::-webkit-scrollbar-thumb { background: rgba(0, 163, 51, 0.55); border-radius: 5px; }
+  .git-body::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; }
   #git-lines { position: absolute; top: 0; left: 0; }
   .commits { list-style: none; margin: 0; padding: 0 0 0 var(--graph-w, 0px); }
   .commit { display: flex; align-items: center; gap: 6px; height: 22px; font-size: 11.5px; white-space: nowrap; }
@@ -371,7 +545,7 @@
   .commit .subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
   .commit .time { color: var(--dim); padding-left: 8px; }
   .chip { border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; font-size: 10px; line-height: 1.5; }
-  .chip-head { color: var(--live); text-shadow: 0 0 6px rgba(0, 255, 65, 0.45); }
+  .chip-head { color: var(--live); text-shadow: var(--glow-live); }
   .chip-tag { color: var(--warn); }
   .chip-remote { color: var(--dim); }
   .chip-branch { color: var(--text); }
@@ -404,9 +578,9 @@
     to { opacity: 1; transform: none; }
   }
   @keyframes node-flash {
-    0% { filter: drop-shadow(0 0 0 rgba(0, 255, 65, 0)); }
-    35% { filter: drop-shadow(0 0 7px rgba(0, 255, 65, 0.95)); }
-    100% { filter: drop-shadow(0 0 0 rgba(0, 255, 65, 0)); }
+    0% { filter: drop-shadow(0 0 0 rgba(var(--live-rgb), 0)); }
+    35% { filter: drop-shadow(0 0 7px rgba(var(--live-rgb), 0.95)); }
+    100% { filter: drop-shadow(0 0 0 rgba(var(--live-rgb), 0)); }
   }
   .commit.is-new { animation: commit-in 260ms ease-out both; }
   .node.is-new { animation: node-flash 900ms ease-out both; }
@@ -416,8 +590,8 @@
     * { animation: none !important; transition: none !important; }
     .worker.state-done::before,
     .worker.state-error::before { display: none; }
-    .worker.state-done { box-shadow: 0 0 9px rgba(0, 255, 65, 0.45), inset 0 0 7px rgba(0, 255, 65, 0.22); }
-    .worker.state-error { box-shadow: 0 0 9px rgba(255, 85, 85, 0.45), inset 0 0 7px rgba(255, 85, 85, 0.22); }
+    .worker.state-done { box-shadow: var(--glow-done-static); }
+    .worker.state-error { box-shadow: var(--glow-error-static); }
   }
 </style>
 </head>
@@ -431,6 +605,11 @@
         <span class="pc-label">PROYECTO</span>
         <select id="project-select" aria-label="Proyecto monitoreado"></select>
       </label>
+      <label class="project-picker theme-picker" for="theme-select">
+        <span class="pc-label">TEMA</span>
+        <select id="theme-select" aria-label="Tema visual"></select>
+      </label>
+      <button type="button" class="bg-toggle" id="bg-toggle" aria-pressed="true">FONDO ON</button>
       <span class="link link-up" id="link" role="status">en línea</span>
       <span class="stamp" id="stamp">esperando la primera lectura…</span>
       <span class="orch" id="orch" title="">
@@ -481,9 +660,14 @@
   var PAD_X = 8;
   var PAD_Y = 11;
   var SVG_NS = "http://www.w3.org/2000/svg";
-  var FALLBACK_LANE_COLOR = "#00a333";
   var HIDDEN_STORAGE_KEY = "fleet-monitor.showHidden";
   var PROJECT_STORAGE_KEY = "fleet-monitor.project";
+  var THEME_STORAGE_KEY = "fleet-monitor.theme";
+  var BACKGROUND_STORAGE_KEY = "fleet-monitor.background";
+  var DEFAULT_THEME = "matrix";
+  // Theme registry: id applied as data-theme, visible name and optional
+  // animated background module. Matrix is the only theme today.
+  var THEMES = [{ id: "matrix", name: "Matrix", background: "matrix-rain" }];
   var snapshot = null;
   var knownShas = new Set();
   var firstRender = true;
@@ -500,6 +684,10 @@
   } catch (error) {
     showHidden = false;
   }
+  var currentTheme = DEFAULT_THEME;
+  var backgroundEnabled = storedItem(BACKGROUND_STORAGE_KEY) !== "0";
+  var activeBackground = null;
+  var tokenCache = null;
 
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -509,6 +697,95 @@
   }
   function clear(node) {
     while (node.firstChild) node.removeChild(node.firstChild);
+  }
+  // Persistence helpers: every storage read/write is wrapped so the page keeps
+  // working with storage unavailable (private mode, blocked).
+  function storedItem(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (error) {
+      return null;
+    }
+  }
+  function rememberItem(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (error) {
+      // Without storage the choice lives only in this page.
+    }
+  }
+  // The colours the script paints itself (canvas, plain-colour fallbacks) come
+  // from the computed theme tokens and are re-read whenever the theme changes.
+  function token(name, fallback) {
+    try {
+      var value = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      if (value) return value;
+    } catch (error) {
+      // A missing computed style keeps the caller's fallback.
+    }
+    return fallback;
+  }
+  function refreshTokens() {
+    tokenCache = null;
+  }
+  function tokens() {
+    if (!tokenCache) {
+      tokenCache = {
+        rainGlyph: token("--rain-glyph", "rgba(0, 255, 65, 0.85)"),
+        rainTrail: token("--rain-trail", "rgba(0, 0, 0, 0.08)"),
+        rainFont: token("--rain-font", "15px monospace"),
+        branchNeutral: token("--branch-neutral", "currentColor")
+      };
+    }
+    return tokenCache;
+  }
+  function themeById(id) {
+    for (var index = 0; index < THEMES.length; index += 1) {
+      if (THEMES[index].id === id) return THEMES[index];
+    }
+    return null;
+  }
+  // Theme selector: the id is applied as data-theme on <html> and remembered
+  // in localStorage; an unknown id always falls back to Matrix. Switching
+  // theme stops the previous background and starts the new theme's module.
+  function applyTheme(id) {
+    var theme = themeById(id) || themeById(DEFAULT_THEME);
+    currentTheme = theme.id;
+    document.documentElement.setAttribute("data-theme", currentTheme);
+    refreshTokens();
+    var select = document.getElementById("theme-select");
+    if (select) select.value = currentTheme;
+    rememberItem(THEME_STORAGE_KEY, currentTheme);
+    startBackground();
+  }
+  function renderThemeSelect() {
+    var select = document.getElementById("theme-select");
+    clear(select);
+    THEMES.forEach(function (theme) {
+      var option = document.createElement("option");
+      option.value = theme.id;
+      option.textContent = theme.name;
+      select.appendChild(option);
+    });
+    select.value = currentTheme;
+  }
+  function stopBackground() {
+    if (!activeBackground) return;
+    activeBackground.stop();
+    activeBackground = null;
+  }
+  function startBackground() {
+    stopBackground();
+    var theme = themeById(currentTheme);
+    var module = theme && theme.background ? BACKGROUNDS[theme.background] : null;
+    if (!backgroundEnabled || !module) return;
+    module.start(document.getElementById("rain"), tokens());
+    activeBackground = module;
+  }
+  function renderBackgroundToggle() {
+    var button = document.getElementById("bg-toggle");
+    button.textContent = backgroundEnabled ? "FONDO ON" : "FONDO OFF";
+    button.setAttribute("aria-pressed", backgroundEnabled ? "true" : "false");
   }
   // Project selector: the chosen id travels as ?project= on every poll, stays
   // in the page URL and is remembered in localStorage. Every storage/history
@@ -690,7 +967,11 @@
     meta.appendChild(el("span", "model", worker.model));
     var swatch = el("span", "branch-swatch");
     swatch.setAttribute("aria-hidden", "true");
-    if (worker.branchColor) swatch.style.background = worker.branchColor;
+    if (worker.branchColorIndex >= 0) {
+      swatch.style.background = "var(--branch-" + worker.branchColorIndex + ")";
+    } else if (typeof worker.branchColorIndex === "number") {
+      swatch.style.background = "var(--branch-neutral)";
+    } else if (worker.branchColor) swatch.style.background = worker.branchColor;
     if (worker.branch) swatch.title = "rama " + worker.branch;
     meta.appendChild(swatch);
     card.appendChild(meta);
@@ -789,10 +1070,18 @@
     return PAD_X + lane * LANE_W;
   }
   // Colours come from the server (one per lane, deterministic per branch
-  // name), so the graph and the worker cards share a single assignment.
+  // name), so the graph and the worker cards share a single assignment. When
+  // the row carries a palette index the graph paints the theme variable
+  // (`--branch-<index>`); otherwise the server hex is the fallback. Strokes are
+  // set through inline styles because var() does not resolve in attributes.
   function laneColor(commit, lane) {
+    var indexes = (commit && commit.laneColorIndexes) || [];
+    var index = indexes[lane];
+    if (typeof index === "number") {
+      return index >= 0 ? "var(--branch-" + index + ")" : "var(--branch-neutral)";
+    }
     var colors = (commit && commit.laneColors) || [];
-    return colors[lane] || FALLBACK_LANE_COLOR;
+    return colors[lane] || tokens().branchNeutral;
   }
   function svgLine(svg, x1, y1, x2, y2, color) {
     var line = document.createElementNS(SVG_NS, "line");
@@ -800,7 +1089,7 @@
     line.setAttribute("y1", y1);
     line.setAttribute("x2", x2);
     line.setAttribute("y2", y2);
-    line.setAttribute("stroke", color);
+    line.style.setProperty("stroke", color);
     line.setAttribute("stroke-width", "1.6");
     line.setAttribute("stroke-linecap", "round");
     svg.appendChild(line);
@@ -809,7 +1098,7 @@
     var path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + 8) + ", " + x2 + " " + (y2 - 8) + ", " + x2 + " " + y2);
     path.setAttribute("fill", "none");
-    path.setAttribute("stroke", color);
+    path.style.setProperty("stroke", color);
     path.setAttribute("stroke-width", "1.6");
     path.setAttribute("stroke-linecap", "round");
     svg.appendChild(path);
@@ -838,7 +1127,7 @@
     node.setAttribute("cx", laneX(commit.lane));
     node.setAttribute("cy", y);
     node.setAttribute("r", "3.2");
-    node.setAttribute("fill", laneColor(commit, commit.lane));
+    node.style.setProperty("fill", laneColor(commit, commit.lane));
     if (isNew) node.setAttribute("class", "node is-new");
     svg.appendChild(node);
   }
@@ -1006,63 +1295,94 @@
       .then(schedule);
   }
 
-  // Digital rain: subtle, ~20 fps, pauses with the tab and turns off for
-  // prefers-reduced-motion.
-  function startRain() {
-    var canvas = document.getElementById("rain");
-    var reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    if (reduced.matches || !canvas.getContext) {
-      canvas.style.display = "none";
-      return;
-    }
-    var context = canvas.getContext("2d");
-    var columns = 0;
-    var drops = [];
-    var frame = null;
-    var last = 0;
-    function resize() {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-      columns = Math.max(1, Math.floor(canvas.width / 16));
-      drops = new Array(columns).fill(0).map(function () {
-        return Math.floor(Math.random() * -40);
-      });
-    }
-    function draw(now) {
-      if (now - last >= 50) {
-        last = now;
-        context.fillStyle = "rgba(0, 0, 0, 0.08)";
-        context.fillRect(0, 0, canvas.width, canvas.height);
-        context.font = "15px 'MS Gothic', 'Yu Gothic', monospace";
-        context.fillStyle = "rgba(0, 255, 65, 0.85)";
-        for (var i = 0; i < columns; i++) {
-          // Like the film: mirrored half-width katakana mixed with digits.
-          var text = Math.random() < 0.8
-            ? String.fromCharCode(0xff66 + Math.floor(Math.random() * 56))
-            : String(Math.floor(Math.random() * 10));
-          context.save();
-          context.translate(i * 16 + 14, drops[i] * 16);
-          context.scale(-1, 1);
-          context.fillText(text, 0, 0);
-          context.restore();
-          if (drops[i] * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
-          drops[i]++;
+  // Animated backgrounds: one registry entry per module, each owning the single
+  // full-page canvas behind the content. Modules run at most ~30 fps (the
+  // Matrix rain keeps its ~20 fps), pause while the tab is hidden and never
+  // start under prefers-reduced-motion. `start` receives the computed theme
+  // tokens so every colour follows the active theme.
+  var BACKGROUNDS = {
+    "matrix-rain": (function () {
+      var canvas = null;
+      var context = null;
+      var columns = 0;
+      var drops = [];
+      var frame = null;
+      var last = 0;
+      var palette = {};
+      var running = false;
+      function resize() {
+        if (!canvas) return;
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        columns = Math.max(1, Math.floor(canvas.width / 16));
+        drops = new Array(columns).fill(0).map(function () {
+          return Math.floor(Math.random() * -40);
+        });
+      }
+      function draw(now) {
+        if (!running) return;
+        if (now - last >= 50) {
+          last = now;
+          context.fillStyle = palette.rainTrail;
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          context.font = palette.rainFont;
+          context.fillStyle = palette.rainGlyph;
+          for (var i = 0; i < columns; i++) {
+            // Like the film: mirrored half-width katakana mixed with digits.
+            var text = Math.random() < 0.8
+              ? String.fromCharCode(0xff66 + Math.floor(Math.random() * 56))
+              : String(Math.floor(Math.random() * 10));
+            context.save();
+            context.translate(i * 16 + 14, drops[i] * 16);
+            context.scale(-1, 1);
+            context.fillText(text, 0, 0);
+            context.restore();
+            if (drops[i] * 16 > canvas.height && Math.random() > 0.975) drops[i] = 0;
+            drops[i]++;
+          }
+        }
+        frame = window.requestAnimationFrame(draw);
+      }
+      function onVisibilityChange() {
+        if (!running) return;
+        if (document.hidden) {
+          if (frame) window.cancelAnimationFrame(frame);
+          frame = null;
+        } else if (!frame) {
+          frame = window.requestAnimationFrame(draw);
         }
       }
-      frame = window.requestAnimationFrame(draw);
-    }
-    function stop() {
-      if (frame) window.cancelAnimationFrame(frame);
-      frame = null;
-    }
-    resize();
-    window.addEventListener("resize", resize);
-    document.addEventListener("visibilitychange", function () {
-      if (document.hidden) stop();
-      else if (!frame) frame = window.requestAnimationFrame(draw);
-    });
-    frame = window.requestAnimationFrame(draw);
-  }
+      function onResize() {
+        resize();
+      }
+      function start(nextCanvas, nextTokens) {
+        if (!nextCanvas || !nextCanvas.getContext) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          nextCanvas.style.display = "none";
+          return;
+        }
+        nextCanvas.style.display = "";
+        canvas = nextCanvas;
+        context = canvas.getContext("2d");
+        palette = nextTokens || {};
+        running = true;
+        last = 0;
+        resize();
+        window.addEventListener("resize", onResize);
+        document.addEventListener("visibilitychange", onVisibilityChange);
+        if (!document.hidden) frame = window.requestAnimationFrame(draw);
+      }
+      function stop() {
+        running = false;
+        if (frame) window.cancelAnimationFrame(frame);
+        frame = null;
+        if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
+        window.removeEventListener("resize", onResize);
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
+      return { start: start, stop: stop, resize: resize };
+    })()
+  };
 
   window.addEventListener("resize", function () {
     if (!snapshot) return;
@@ -1073,6 +1393,17 @@
   document.getElementById("project-select").addEventListener("change", function (event) {
     applyProject(event.target.value);
     poll();
+  });
+
+  document.getElementById("theme-select").addEventListener("change", function (event) {
+    applyTheme(event.target.value);
+  });
+
+  document.getElementById("bg-toggle").addEventListener("click", function () {
+    backgroundEnabled = !backgroundEnabled;
+    rememberItem(BACKGROUND_STORAGE_KEY, backgroundEnabled ? "1" : "0");
+    renderBackgroundToggle();
+    startBackground();
   });
 
   document.getElementById("hidden-toggle").addEventListener("click", function () {
@@ -1093,7 +1424,9 @@
     }
   });
 
-  startRain();
+  renderThemeSelect();
+  renderBackgroundToggle();
+  applyTheme(storedItem(THEME_STORAGE_KEY) || DEFAULT_THEME);
   loadProjects();
 })();
 </script>

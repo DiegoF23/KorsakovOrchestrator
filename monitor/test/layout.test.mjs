@@ -194,3 +194,95 @@ test("every inline script block parses", () => {
     assert.doesNotThrow(() => new Function(block[1]));
   });
 });
+
+function styleCss() {
+  const block = html.match(/<style>([\s\S]*?)<\/style>/);
+  assert.ok(block, "the page keeps its CSS in one style block");
+  return block[1];
+}
+
+function themeTokenBlocks() {
+  const css = styleCss().replace(/\/\*[\s\S]*?\*\//g, "");
+  return Array.from(css.matchAll(/:root[^{]*\{[^}]*\}/g)).map((match) => match[0]);
+}
+
+test("every colour outside the theme token blocks comes from var()", () => {
+  // Everything that paints a colour must read a token; `transparent` and
+  // `currentColor` carry no value of their own, and the mask gradient is
+  // tokenized too (`--mask-fill`), so the CSS stays theme-agnostic.
+  const css = styleCss().replace(/:root[^{]*\{[^}]*\}/g, "");
+  const hex = css.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+  assert.deepEqual(hex, [], "hex colours outside the token blocks: " + hex.join(", "));
+  const literalRgb = css.match(/\brgba?\(\s*(?!var\()/g) || [];
+  assert.deepEqual(literalRgb, [], "literal rgb()/rgba() outside the token blocks");
+  assert.match(css, /transparent/);
+  assert.match(css, /currentColor/);
+  assert.doesNotMatch(css, /linear-gradient\(#/);
+});
+
+test("the Matrix theme block defines every token group the page promises", () => {
+  const matrix = themeTokenBlocks().find((block) => /\[data-theme="matrix"\]/.test(block));
+  assert.ok(matrix, "the Matrix theme block exists");
+  for (const name of ["--bg", "--panel", "--live", "--text", "--dim", "--warn", "--err", "--work", "--wait", "--stale"]) {
+    assert.match(matrix, new RegExp(name + ":"), name + " stays in the state palette");
+  }
+  for (let index = 0; index < 8; index += 1) {
+    assert.match(matrix, new RegExp("--branch-" + index + ":"), "branch slot " + index);
+  }
+  assert.match(matrix, /--branch-neutral:/);
+  for (const name of ["--code-bg", "--code-text", "--code-keyword", "--code-string", "--code-comment", "--code-number", "--code-function", "--code-added-bg", "--code-removed-bg"]) {
+    assert.match(matrix, new RegExp(name + ":"), name + " stays in the code palette");
+  }
+  for (let index = 0; index < 16; index += 1) {
+    assert.match(matrix, new RegExp("--ansi-" + index + ":"), "ansi colour " + index);
+  }
+});
+
+test("the base :root fallback mirrors the Matrix values so nothing renders unstyled", () => {
+  const blocks = themeTokenBlocks();
+  const base = blocks.find((block) => /^:root\s*\{/.test(block));
+  const matrix = blocks.find((block) => /\[data-theme="matrix"\]/.test(block));
+  assert.ok(base, "the fallback block exists");
+  assert.ok(matrix, "the Matrix block exists");
+  const values = (block) => Array.from(block.matchAll(/(--[\w-]+):\s*([^;]+);/g)).map((match) => match[1] + ":" + match[2].trim());
+  assert.deepEqual(values(base), values(matrix));
+});
+
+test("the header offers the theme picker and the background switch, remembered in storage", () => {
+  assert.match(html, /var THEMES = \[\{ id: "matrix", name: "Matrix", background: "matrix-rain" \}\]/);
+  assert.match(html, /<select id="theme-select"/);
+  assert.match(html, /for="theme-select"/);
+  assert.match(html, /<button type="button" class="bg-toggle" id="bg-toggle" aria-pressed="true">FONDO ON<\/button>/);
+  // The theme is applied before the stylesheet renders, so the first paint is
+  // already themed.
+  assert.match(html, /<script>[\s\S]{0,400}localStorage\.getItem\("fleet-monitor\.theme"\)[\s\S]{0,400}<\/script>\s*<style>/);
+  assert.match(html, /storedItem\(THEME_STORAGE_KEY\)/);
+  assert.match(html, /rememberItem\(THEME_STORAGE_KEY, currentTheme\)/);
+  assert.match(html, /try \{[\s\S]{0,120}localStorage\.getItem\(key[\s\S]{0,120}\} catch/);
+  assert.match(html, /try \{[\s\S]{0,200}localStorage\.setItem\(key[\s\S]{0,200}\} catch/);
+  assert.match(html, /document\.documentElement\.setAttribute\("data-theme"/);
+  assert.match(html, /backgroundEnabled \? "FONDO ON" : "FONDO OFF"/);
+});
+
+test("the animated background is a registry module that follows the theme rules", () => {
+  assert.match(html, /var BACKGROUNDS = \{/);
+  assert.match(html, /"matrix-rain": \(function \(\) \{/);
+  assert.match(html, /return \{ start: start, stop: stop, resize: resize \}/);
+  assert.match(html, /now - last >= 50/);
+  assert.match(html, /if \(!running\) return/);
+  assert.match(html, /document\.hidden/);
+  assert.match(html, /prefers-reduced-motion: reduce/);
+  assert.match(html, /palette\.rainGlyph/);
+  assert.match(html, /module\.start\(document\.getElementById\("rain"\), tokens\(\)\)/);
+  assert.match(html, /#rain\s*\{[^}]*pointer-events:\s*none/);
+});
+
+test("the page paints branch colours through the theme variables when it can", () => {
+  assert.match(html, /commit\.laneColorIndexes/);
+  assert.match(html, /"var\(--branch-" \+ index/);
+  assert.match(html, /"var\(--branch-" \+ worker\.branchColorIndex/);
+  assert.match(html, /"var\(--branch-neutral\)"/);
+  assert.match(html, /swatch\.style\.background = worker\.branchColor/);
+  assert.match(html, /line\.style\.setProperty\("stroke", color\)/);
+  assert.match(html, /node\.style\.setProperty\("fill"/);
+});

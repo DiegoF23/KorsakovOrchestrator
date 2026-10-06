@@ -14,17 +14,26 @@ export const LANE_COLORS = ["#00ff41", "#ffb000", "#55aaff", "#ff66cc", "#9dff4d
 // the page's --dim).
 export const NEUTRAL_BRANCH_COLOR = "#00a333";
 
-// Deterministic colour per branch name: the same function feeds the graph
-// lanes, the nodes and the worker-card swatch. An empty name gets the neutral
-// colour instead of the palette.
-export function branchColor(name) {
+// Deterministic palette slot per branch name: the same hash feeds the graph
+// lanes, the nodes, the worker-card swatch and the CSS variables
+// (`--branch-0` … `--branch-7`). An empty or unknown name gets -1, which the
+// page renders with the neutral colour.
+export function branchColorIndex(name) {
   const text = String(name ?? "").trim();
-  if (!text) return NEUTRAL_BRANCH_COLOR;
+  if (!text) return -1;
   let hash = 0;
   for (let index = 0; index < text.length; index += 1) {
     hash = (hash * 31 + text.charCodeAt(index)) >>> 0;
   }
-  return LANE_COLORS[hash % LANE_COLORS.length];
+  return hash % LANE_COLORS.length;
+}
+
+// Deterministic colour per branch name: the same function feeds the graph
+// lanes, the nodes and the worker-card swatch. An empty name gets the neutral
+// colour instead of the palette.
+export function branchColor(name) {
+  const index = branchColorIndex(name);
+  return index === -1 ? NEUTRAL_BRANCH_COLOR : LANE_COLORS[index];
 }
 
 // Branch name of a single decoration: local branches and the HEAD branch win,
@@ -116,7 +125,10 @@ export function parseGitLog(stdout) {
 // - lanesBefore / lanesAfter: the sha each lane waits for around this row, so
 //   the renderer can draw pass-through verticals and current merge edges
 // - laneColors: one hex colour per lane index for this row, taken from the
-//   branch the lane carries (falling back to the fixed lane palette).
+//   branch the lane carries (falling back to the fixed lane palette)
+// - laneColorIndexes: the matching palette slot per lane (never -1 here: an
+//   unnamed lane falls back to its own position in the palette), so the page
+//   can paint with the theme's `--branch-<index>` variables.
 export function assignLanes(commits) {
   const active = [];
   const activeNames = [];
@@ -177,10 +189,13 @@ export function assignLanes(commits) {
     const lanesAfter = active.slice();
     while (lanesAfter.length && lanesAfter[lanesAfter.length - 1] === null) lanesAfter.pop();
     const laneColors = [];
+    const laneColorIndexes = [];
     for (let index = 0; index < width; index += 1) {
-      laneColors.push(namesBefore[index] ? branchColor(namesBefore[index]) : LANE_COLORS[index % LANE_COLORS.length]);
+      const name = namesBefore[index];
+      laneColors.push(name ? branchColor(name) : LANE_COLORS[index % LANE_COLORS.length]);
+      laneColorIndexes.push(name ? branchColorIndex(name) : index % LANE_COLORS.length);
     }
-    rows.push({ ...commit, lane, parents: links, lanesBefore, lanesAfter, laneColors });
+    rows.push({ ...commit, lane, parents: links, lanesBefore, lanesAfter, laneColors, laneColorIndexes });
   }
 
   return rows.map((row) => ({ ...row, laneCount: width }));
