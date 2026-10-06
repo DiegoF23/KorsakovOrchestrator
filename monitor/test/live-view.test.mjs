@@ -17,6 +17,7 @@ import {
   highlight,
   highlightPath,
   init,
+  isFinishedWorker,
   languageForPath,
   memoryProse,
   memoryResultRows,
@@ -400,4 +401,11 @@ test("a re-delivered step is replayed only when it changed", () => {
   assert.equal(stepSignature(running), stepSignature({ ...running }));
   assert.notEqual(stepSignature(running), stepSignature(finished));
   assert.equal(stepSignature(null), "");
+});
+test("finished or stopped workers are shown at once, never replayed", () => {
+  assert.equal(isFinishedWorker({ stateKind: "done" }), true);
+  assert.equal(isFinishedWorker({ stateKind: "error" }), true);
+  assert.equal(isFinishedWorker({ stateKind: "working" }), false);
+  assert.equal(isFinishedWorker({ state: "waiting" }), false);
+  assert.equal(isFinishedWorker(null), false);
 });

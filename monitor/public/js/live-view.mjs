@@ -37,6 +37,13 @@ export function pollSince(order, steps) {
   return firstRunning > 0 ? ids[firstRunning - 1] : null;
 }
 
+// Done or stopped workers are not animated: their viewer opens on the final
+// state, and a worker that finishes mid-replay flushes what is left.
+export function isFinishedWorker(worker) {
+  const kind = String(worker?.stateKind ?? worker?.state ?? "").toLowerCase();
+  return kind === "done" || kind === "error";
+}
+
 // A cheap fingerprint: a re-delivered step is replayed only when it changed.
 export function stepSignature(step) {
   if (!step) return "";
@@ -918,7 +925,8 @@ export function init(options = {}) {
       return;
     }
     if (doc.hidden || !state.open) return;
-    const skip = catchUpCount(state.queue.length);
+    // A finished worker shows its final result at once: nothing is replayed.
+    const skip = isFinishedWorker(state.worker) ? state.queue.length : catchUpCount(state.queue.length);
     for (let index = 0; index < skip; index += 1) {
       renderStep(state, state.queue.shift(), true, () => {});
     }
