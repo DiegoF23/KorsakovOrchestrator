@@ -115,6 +115,22 @@ el servidor: consumo 60 s, PC 10 s, árbol de git 10 s. La configuración
 así que editarla (por ejemplo, el modelo del orquestador) surte efecto sin
 reiniciar el servidor.
 
+## Temas
+
+La apariencia completa sale de tokens CSS: colores, fuentes, brillos y bordes
+animados viven en un bloque `:root[data-theme="<id>"]` de `index.html` (con un
+`:root` de respaldo que repite los valores de Matrix). El encabezado tiene un
+selector **TEMA** —la elección se recuerda en el navegador— y un interruptor
+**FONDO** que enciende o apaga el fondo animado sin cambiar de tema. Hoy existe
+solo **Matrix**, que reproduce el aspecto de siempre.
+
+Para agregar un tema: copiar el bloque de Matrix con un `id` nuevo, completar
+todos los tokens (estados, paleta de ramas 0–7, resaltado de código, colores
+ANSI, tipografías y efectos) y, si el tema lo pide, sumar un módulo a
+`BACKGROUNDS` con `start(canvas, tokens)`, `stop()` y `resize()`. Los requisitos
+completos —contraste, fuentes locales, fondo en una capa propia y a lo sumo
+~30 fps— están en `docs/temas.md`.
+
 ## Traducciones y resúmenes
 
 Los commits en git siguen en inglés; el panel traduce **solo la vista** con un
