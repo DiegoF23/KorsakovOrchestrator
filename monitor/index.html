@@ -228,7 +228,8 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
   }
   .topbar {
     flex: 0 0 auto;
@@ -368,6 +369,7 @@
     text-underline-offset: 2px;
   }
   .hidden-toggle:hover { color: var(--text); }
+  .usage[hidden], .pc[hidden] { display: none; }
   .workers {
     flex: 0 0 auto;
     min-height: 0;
@@ -386,6 +388,28 @@
     background: var(--panel);
     padding: 5px 8px;
   }
+  /* Up to four miniature Claude cards in the room of one (2x2): crisp smaller text via zoom. */
+  .worker-group {
+    position: relative;
+    min-width: 0;
+    min-height: 260px;
+    contain: size;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(0, 1fr);
+    gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel);
+  }
+  .worker-group.group-working { border-color: rgba(var(--work-rgb), 0.55); }
+  .worker-group.group-done { border-color: rgba(var(--live-rgb), 0.55); }
+  .worker-group.group-error { border-color: rgba(var(--err-rgb), 0.6); }
+  .worker-group .mini:only-child { grid-column: span 2; }
+  .worker-group .mini { min-width: 0; min-height: 0; overflow: hidden; zoom: 0.5; }
+  .worker-group .mini > .worker { height: 100%; box-sizing: border-box; }
   .worker.state-working { border-color: rgba(var(--work-rgb), 0.5); }
   .worker.state-done { border-color: rgba(var(--live-rgb), 0.55); --tron-rgb: var(--live-rgb); }
   .worker.state-error { border-color: rgba(var(--err-rgb), 0.6); --tron-rgb: var(--err-rgb); }
@@ -576,12 +600,42 @@
   .git-body::-webkit-scrollbar { width: 9px; }
   .git-body::-webkit-scrollbar-track { background: transparent; }
   .git-body::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 5px; }
-  #git-lines { position: absolute; top: 0; left: 0; }
-  .commits { list-style: none; margin: 0; padding: 0 0 0 var(--graph-w, 0px); }
-  .commit { display: flex; align-items: center; gap: 6px; height: 22px; font-size: 11.5px; white-space: nowrap; }
+  #git-lines { position: absolute; top: 0; left: var(--time-w); cursor: default; }
+  .git-tip {
+    position: fixed;
+    z-index: 60;
+    max-width: 380px;
+    padding: 6px 9px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel);
+    color: var(--text);
+    font-size: 11px;
+    line-height: 1.45;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 120ms ease-out, transform 120ms ease-out;
+    box-shadow: 0 0 14px rgba(var(--live-rgb), 0.25);
+  }
+  .git-tip.is-open { opacity: 1; transform: none; }
+  .git-tip .tip-head { color: var(--live); text-shadow: var(--glow-live); }
+  .git-tip .tip-subject { color: var(--text); font-weight: bold; overflow-wrap: anywhere; }
+  .git-tip .tip-dim { color: var(--dim); overflow-wrap: anywhere; }
+  .git { --time-w: 82px; }
+  .commits { list-style: none; margin: 0; padding: 0; }
+  .commit, .day-row { display: grid; grid-template-columns: var(--time-w) var(--graph-w, 0px) minmax(0, 1fr); align-items: center; height: 22px; font-size: 11.5px; white-space: nowrap; }
+  .commit .time, .day-row .time { color: var(--dim); text-align: right; padding-right: 10px; font-variant-numeric: tabular-nums; }
+  .day-row { color: var(--dim); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; }
+  .commit .msg { display: flex; align-items: center; gap: 7px; min-width: 0; }
   .commit .sha { color: var(--dim); }
-  .commit .subject { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
-  .commit .time { color: var(--dim); padding-left: 8px; }
+  .commit .subject { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+  .commit .scope { color: var(--dim); }
+  .commit .msg .chip:first-of-type { margin-left: auto; }
+  .ctype { padding: 0 6px; border: 1px solid currentColor; border-radius: 3px; font-size: 10px; line-height: 1.5; text-transform: uppercase; }
+  .ctype-feat { color: var(--live); } .ctype-fix { color: var(--warn); } .ctype-docs { color: var(--branch-6); }
+  .ctype-merge { color: var(--branch-7); } .ctype-test { color: var(--branch-4); } .ctype-chore, .ctype-build, .ctype-ci { color: var(--dim); }
+  .ctype-refactor, .ctype-perf, .ctype-style { color: var(--branch-2); }
   .chip { border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; font-size: 10px; line-height: 1.5; }
   .chip-head { color: var(--live); text-shadow: var(--glow-live); }
   .chip-tag { color: var(--warn); }
@@ -589,11 +643,7 @@
   .chip-branch { color: var(--text); }
   .git-empty, .empty { color: var(--dim); font-size: 11px; margin: 0; }
   /* Card mode: with little free space left the tree stops being a full-width
-     panel and becomes the first card of the workers grid, matching a worker
-     card. The graph and the ref chips are hidden and rows get compact, but the
-     newest commits stay browsable with the card's own scroll. `contain: size`
-     keeps the long commit list from inflating its grid row; the mode decision
-     (with hysteresis) lives in the git-layout-logic script block. */
+     panel and becomes a card in the workers grid: the last cell, spanning the free slots of the last row (see applyGitLayout). The graph and the ref chips are hidden and rows get compact, but the newest commits stay browsable with the card's own scroll. */
   .workers > .git {
     border: 1px solid var(--border);
     border-radius: 5px;
@@ -603,14 +653,29 @@
     min-height: 140px;
     overflow: hidden;
     contain: size;
+    grid-column: span var(--git-span, 1);
   }
   .workers > .git h2 { margin-bottom: 1px; }
-  .workers > .git #git-lines { display: none; }
-  .workers > .git .commits { padding-left: 0; }
-  .workers > .git .commit { height: 20px; font-size: 11px; }
+  .workers > .git { --time-w: 66px; }
+  .workers > .git .commit, .workers > .git .day-row { height: 20px; font-size: 11px; }
+  .workers > .git .ctype, .workers > .git .scope { display: none; }
   .workers > .git .commit .chip { display: none; }
   /* A card leaves the grid flow only while the page measures the free space. */
   .git.is-measuring { position: absolute; visibility: hidden; left: 0; right: 0; }
+  /* Cards enter with a Matrix reveal (top to bottom plus a green flash) and leave collapsing upward. */
+  @keyframes card-in {
+    0% { opacity: 0; clip-path: inset(0 0 100% 0); filter: brightness(2.2); transform: translateY(8px); }
+    55% { opacity: 1; clip-path: inset(0 0 0 0); box-shadow: 0 0 20px rgba(var(--live-rgb), 0.6); filter: brightness(1.5); }
+    100% { opacity: 1; clip-path: inset(0 0 0 0); filter: none; transform: none; }
+  }
+  @keyframes card-out {
+    0% { opacity: 1; clip-path: inset(0 0 0 0); }
+    35% { opacity: 0.9; filter: brightness(1.7); box-shadow: 0 0 16px rgba(var(--live-rgb), 0.5); }
+    100% { opacity: 0; clip-path: inset(100% 0 0 0); filter: blur(2px); }
+  }
+  .worker.is-entering, .worker-group.is-entering { animation: card-in 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+  .worker.is-leaving, .worker-group.is-leaving { animation: card-out 480ms ease-in both; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { .worker.is-entering, .worker.is-leaving, .worker-group.is-entering, .worker-group.is-leaving { animation: none; } }
   @keyframes commit-in {
     from { opacity: 0; transform: translateY(-6px); }
     to { opacity: 1; transform: none; }
@@ -985,32 +1050,22 @@
   <section class="git" id="git-section" aria-labelledby="git-title">
     <h2 id="git-title">Árbol de git <span class="dim" id="git-meta"></span></h2>
     <div class="git-body" id="git-body">
-      <svg id="git-lines" aria-hidden="true"></svg>
+      <canvas id="git-lines" aria-hidden="true"></canvas>
       <ol class="commits" id="git-commits"></ol>
     </div>
   </section>
 </div>
 
-<script id="git-layout-logic">
-  // Git tree mode decision, kept pure so the layout tests can exercise it.
-  // Below one worker card (140 px) or 22 % of the viewport the tree becomes a
-  // card; the 24 px margin between both thresholds is the hysteresis that
-  // keeps the page from flickering between the panel and the card.
-  var GIT_PANEL_MIN_PX = 140;
-  var GIT_CARD_MIN_VH = 0.22;
-  var GIT_MODE_HYSTERESIS_PX = 24;
-  function gitCardMode(available, viewportHeight, previous) {
-    var threshold = Math.max(GIT_PANEL_MIN_PX, viewportHeight * GIT_CARD_MIN_VH);
-    var limit = previous === "card" ? threshold + GIT_MODE_HYSTERESIS_PX : threshold;
-    return available < limit ? "card" : "panel";
-  }
-</script>
 <script>
 (function () {
   "use strict";
 
   var POLL_FALLBACK = 5;
   var BAR_SEGMENTS = 10;
+  var GRID_MIN_CARD_PX = 270;
+  var workersShownFor = null;
+  var MINI_GROUP_FROM = 2;
+  var MINI_LINES = 4;
   var ROW_H = 22;
   var LANE_W = 14;
   var PAD_X = 8;
@@ -1027,7 +1082,6 @@
   var snapshot = null;
   var knownShas = new Set();
   var firstRender = true;
-  var gitMode = "panel";
   var showHidden = false;
   var projectId = null;
   var projectList = [];
@@ -1358,6 +1412,7 @@
   function workerCard(worker, activityLines, hiddenCard) {
     var kind = worker.stateKind || worker.state;
     var card = el("article", "worker state-" + kind + (hiddenCard ? " worker-hidden" : ""));
+    card.setAttribute("data-key", String(worker.name || worker.identity || ""));
     var head = el("div", "worker-head");
     head.setAttribute("aria-label", worker.title || worker.identity);
     head.appendChild(el("span", "identity", worker.identity));
@@ -1426,11 +1481,22 @@
   function renderWorkers(workers, hiddenWorkers, hiddenFinished, activityLines, activityLinesTotal) {
     var box = document.getElementById("workers");
     var gitCard = document.getElementById("git-section");
+    // Remember the previous cards so arrivals and departures can animate.
+    var previousCards = {};
+    Array.prototype.forEach.call(box.querySelectorAll(".worker[data-key], .worker-group[data-key]"), function (node) {
+      previousCards[node.getAttribute("data-key")] = {
+        node: node,
+        top: node.parentNode === box,
+        index: Array.prototype.indexOf.call(box.children, node)
+      };
+    });
     // In card mode the tree lives first in this grid; keep it in place so its
     // scroll position survives every refresh.
     Array.prototype.slice.call(box.children).forEach(function (child) {
       if (child !== gitCard) box.removeChild(child);
     });
+    var animate = workersShownFor === projectId;
+    workersShownFor = projectId;
     var list = workers || [];
     var hiddenList = hiddenWorkers || [];
     var active = list.filter(function (worker) {
@@ -1455,9 +1521,65 @@
     // count towards the total.
     var budget = Number(showHidden ? activityLinesTotal : activityLines);
     if (!(budget > 0)) budget = 8;
+    var isHiddenCard = function (worker) {
+      return showHidden && hiddenList.indexOf(worker) !== -1;
+    };
+    // Subagents launched together (the server tags them with the same
+    // miniGroup, up to four) share one cell of miniature cards, and leave the
+    // board together. A lone subagent, the orchestrator session and every other
+    // engine keep their normal card.
+    var batches = {};
+    var batchOrder = [];
     cards.forEach(function (worker) {
-      box.appendChild(workerCard(worker, budget, showHidden && hiddenList.indexOf(worker) !== -1));
+      if (!worker.miniGroup) return;
+      if (!batches[worker.miniGroup]) {
+        batches[worker.miniGroup] = [];
+        batchOrder.push(worker.miniGroup);
+      }
+      batches[worker.miniGroup].push(worker);
     });
+    var others = cards.filter(function (worker) {
+      return !worker.miniGroup || batches[worker.miniGroup].length < MINI_GROUP_FROM;
+    });
+    batchOrder.forEach(function (key) {
+      if (batches[key].length < MINI_GROUP_FROM) return;
+      var group = el("div", "worker-group");
+      var kinds = batches[key].map(function (worker) {
+        return worker.stateKind || worker.state;
+      });
+      group.classList.add(kinds.indexOf("working") !== -1 ? "group-working" : kinds.indexOf("error") !== -1 ? "group-error" : "group-done");
+      group.setAttribute("data-key", "group:" + key);
+      batches[key].forEach(function (worker) {
+        var mini = el("div", "mini");
+        mini.appendChild(workerCard(worker, MINI_LINES, isHiddenCard(worker)));
+        group.appendChild(mini);
+      });
+      box.appendChild(group);
+    });
+    others.forEach(function (worker) {
+      box.appendChild(workerCard(worker, budget, isHiddenCard(worker)));
+    });
+    var present = {};
+    Array.prototype.forEach.call(box.querySelectorAll(".worker[data-key], .worker-group[data-key]"), function (node) {
+      var key = node.getAttribute("data-key");
+      present[key] = true;
+      // The cards of a group that is itself arriving do not animate twice.
+      if (animate && !previousCards[key] && !node.parentNode.closest(".worker-group.is-entering")) node.classList.add("is-entering");
+    });
+    if (animate) {
+      Object.keys(previousCards).forEach(function (key) {
+        var gone = previousCards[key];
+        if (present[key] || !gone.top) return;
+        gone.node.classList.remove("is-entering");
+        gone.node.classList.add("is-leaving");
+        box.insertBefore(gone.node, box.children[Math.min(Math.max(gone.index, 0), box.children.length)] || null);
+        var drop = function () {
+          if (gone.node.parentNode) gone.node.parentNode.removeChild(gone.node);
+        };
+        gone.node.addEventListener("animationend", drop, { once: true });
+        window.setTimeout(drop, 800);
+      });
+    }
   }
 
   function renderPc(pc) {
@@ -1499,25 +1621,17 @@
     var colors = (commit && commit.laneColors) || [];
     return colors[lane] || tokens().branchNeutral;
   }
-  function svgLine(svg, x1, y1, x2, y2, color) {
-    var line = document.createElementNS(SVG_NS, "line");
-    line.setAttribute("x1", x1);
-    line.setAttribute("y1", y1);
-    line.setAttribute("x2", x2);
-    line.setAttribute("y2", y2);
-    line.style.setProperty("stroke", color);
-    line.setAttribute("stroke-width", "1.6");
-    line.setAttribute("stroke-linecap", "round");
-    svg.appendChild(line);
+  // The rails are drawn on a canvas (binary glyphs along each lane); these
+  // collectors only record the geometry of every row.
+  function svgLine(rails, x1, y1, x2, y2, color, main) {
+    rails.segs.push({ kind: "line", x1: x1, y1: y1, x2: x2, y2: y2, color: main ? MAIN_COLOR : color, main: Boolean(main) });
   }
-  function svgCurve(svg, x1, y1, x2, y2, color) {
-    var path = document.createElementNS(SVG_NS, "path");
-    path.setAttribute("d", "M " + x1 + " " + y1 + " C " + x1 + " " + (y1 + 8) + ", " + x2 + " " + (y2 - 8) + ", " + x2 + " " + y2);
-    path.setAttribute("fill", "none");
-    path.style.setProperty("stroke", color);
-    path.setAttribute("stroke-width", "1.6");
-    path.setAttribute("stroke-linecap", "round");
-    svg.appendChild(path);
+  function svgCurve(rails, x1, y1, x2, y2, color, main) {
+    rails.segs.push({ kind: "curve", x1: x1, y1: y1, x2: x2, y2: y2, color: main ? MAIN_COLOR : color, main: Boolean(main) });
+  }
+  function laneIsMain(commit, lane) {
+    var flags = (commit && commit.laneMain) || [];
+    return flags[lane] === true;
   }
   function drawCommit(svg, commit, index, isNew) {
     var y = index * ROW_H + PAD_Y;
@@ -1528,47 +1642,267 @@
       var x = laneX(lane);
       var hasTop = before[lane] !== null && before[lane] !== undefined;
       var hasBottom = after[lane] !== null && after[lane] !== undefined;
+      var main = laneIsMain(commit, lane);
       if (lane === commit.lane) {
-        if (hasTop) svgLine(svg, x, y - PAD_Y, x, y, laneColor(commit, lane));
-        if (hasBottom) svgLine(svg, x, y, x, y + PAD_Y, laneColor(commit, lane));
+        if (hasTop) svgLine(svg, x, y - PAD_Y, x, y, laneColor(commit, lane), main);
+        if (hasBottom) svgLine(svg, x, y, x, y + PAD_Y, laneColor(commit, lane), main);
       } else if (hasTop || hasBottom) {
-        svgLine(svg, x, y - PAD_Y, x, y + PAD_Y, laneColor(commit, lane));
+        svgLine(svg, x, y - PAD_Y, x, y + PAD_Y, laneColor(commit, lane), main);
       }
     }
-    (commit.parents || []).forEach(function (link) {
+    (commit.parents || []).forEach(function (link, linkIndex) {
       if (link.lane === commit.lane) return;
-      svgCurve(svg, laneX(commit.lane), y, laneX(link.lane), y + PAD_Y, laneColor(commit, link.lane));
+      svgCurve(svg, laneX(commit.lane), y, laneX(link.lane), y + PAD_Y, laneColor(commit, link.lane), (commit.parentsMain || [])[linkIndex] === true);
     });
-    var node = document.createElementNS(SVG_NS, "circle");
-    node.setAttribute("cx", laneX(commit.lane));
-    node.setAttribute("cy", y);
-    node.setAttribute("r", "3.2");
-    node.style.setProperty("fill", laneColor(commit, commit.lane));
-    if (isNew) node.setAttribute("class", "node is-new");
-    svg.appendChild(node);
+    svg.nodes.push({
+      x: laneX(commit.lane),
+      y: y,
+      color: laneIsMain(commit, commit.lane) ? MAIN_COLOR : laneColor(commit, commit.lane),
+      main: laneIsMain(commit, commit.lane),
+      born: isNew ? performance.now() : 0,
+      commit: commit
+    });
+  }
+  function dayLabel(iso) {
+    if (!iso) return "";
+    var time = new Date(iso);
+    if (!Number.isFinite(time.getTime())) return "";
+    var start = new Date();
+    start.setHours(0, 0, 0, 0);
+    var that = new Date(time.getFullYear(), time.getMonth(), time.getDate()).getTime();
+    var days = Math.round((start.getTime() - that) / 86400000);
+    if (days <= 0) return "Hoy";
+    if (days === 1) return "Ayer";
+    return "Hace " + days + " d";
+  }
+  function daySeparator(label) {
+    var item = el("li", "day-row");
+    item.appendChild(el("span", "time", label));
+    return item;
   }
   function commitRow(commit, isNew) {
     var item = el("li", "commit" + (isNew ? " is-new" : ""));
-    (commit.refs || []).forEach(function (ref) {
-      item.appendChild(el("span", "chip chip-" + ref.kind, ref.name));
-    });
-    item.appendChild(el("span", "sha", commit.shortSha));
-    var english = commit.subject || "";
-    var subject = el("span", "subject", commit.subjectEs || english || "(sin asunto)");
-    subject.title = english;
-    item.appendChild(subject);
     item.appendChild(el("span", "time", relativeTime(commit.time)));
+    item.appendChild(el("span", "gspace"));
+    var msg = el("span", "msg");
+    msg.appendChild(el("span", "sha", commit.shortSha));
+    var english = commit.subject || "";
+    var shown = commit.subjectEs || english || "(sin asunto)";
+    var parsed = /^([A-Za-z]+)(?:\(([^)]+)\))?!?:\s*(.*)$/.exec(shown);
+    if (parsed) {
+      msg.appendChild(el("span", "ctype ctype-" + parsed[1].toLowerCase(), parsed[1]));
+      if (parsed[2]) msg.appendChild(el("span", "scope", "(" + parsed[2] + ")"));
+      shown = parsed[3] || "";
+    }
+    var subject = el("span", "subject", shown);
+    subject.title = english;
+    msg.appendChild(subject);
+    (commit.refs || []).forEach(function (ref) {
+      msg.appendChild(el("span", "chip chip-" + ref.kind, ref.name));
+    });
+    item.appendChild(msg);
     return item;
+  }
+  // ---- Binary rails: a canvas drawn at the display refresh rate ----------
+  var gitRails = null;
+  var MAIN_COLOR = "var(--branch-0)";
+  var GLYPH_STEP = 13;
+  var WAVE_SPEED = 0.9;
+  function railColor(rails, color) {
+    if (color.indexOf("var(") !== 0) return color;
+    var name = color.slice(4, -1).trim();
+    if (!rails.colors[name]) {
+      rails.colors[name] = window.getComputedStyle(document.documentElement).getPropertyValue(name).trim() || "#00ff41";
+    }
+    return rails.colors[name];
+  }
+  function glyphAt(x, y, flip) {
+    var seed = Math.imul(Math.round(x * 7 + y * 13) + flip * 977, 2654435761) >>> 0;
+    return (seed >>> 13) & 1 ? "1" : "0";
+  }
+  // Brightness travels up each line as a wave; digits flip while they are lit.
+  function drawGlyph(ctx, x, y, color, main, time, ms) {
+    var wave = Math.sin(6.2832 * (y / 130 + time * WAVE_SPEED + x * 0.017));
+    var lit = wave > 0 ? wave * wave * wave : 0;
+    ctx.globalAlpha = (main ? 0.22 : 0.08) + (main ? 0.6 : 0.5) * lit;
+    ctx.fillStyle = lit > 0.95 ? "#d8ffe6" : color;
+    ctx.fillText(glyphAt(x, y, lit > 0.7 ? Math.floor(ms / 300) : 0), x, y + 3.5);
+  }
+  function gitFrame(ms) {
+    window.requestAnimationFrame(gitFrame);
+
+    var rails = gitRails;
+    var canvas = document.getElementById("git-lines");
+    var body = document.getElementById("git-body");
+    if (!rails || !canvas || !body || (!rails.segs.length && !rails.nodes.length)) return;
+    var ctx = canvas.getContext("2d");
+    var time = ms / 1000;
+    var top = body.scrollTop - 40;
+    var bottom = body.scrollTop + body.clientHeight + 40;
+    ctx.setTransform(rails.dpr, 0, 0, rails.dpr, 0, 0);
+    ctx.clearRect(0, 0, rails.width, rails.height);
+    ctx.textAlign = "center";
+    rails.segs.forEach(function (seg) {
+      var minY = Math.min(seg.y1, seg.y2);
+      var maxY = Math.max(seg.y1, seg.y2);
+      if (maxY < top || minY > bottom) return;
+      var color = railColor(rails, seg.color);
+      ctx.beginPath();
+      ctx.moveTo(seg.x1, seg.y1);
+      if (seg.kind === "curve") ctx.bezierCurveTo(seg.x1, seg.y1 + 8, seg.x2, seg.y2 - 8, seg.x2, seg.y2);
+      else ctx.lineTo(seg.x2, seg.y2);
+      ctx.lineCap = "round";
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = seg.main ? 6 : 3;
+      ctx.globalAlpha = seg.main ? 0.16 : 0.07;
+      ctx.lineWidth = seg.main ? 6 : 4;
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = seg.main ? 0.6 : 0.22;
+      ctx.lineWidth = seg.main ? 1.8 : 1;
+      ctx.stroke();
+      ctx.font = (seg.main ? "bold 11px" : "9px") + " Consolas, monospace";
+      if (seg.kind === "line") {
+        var first = Math.ceil(minY / GLYPH_STEP) * GLYPH_STEP;
+        for (var y = first; y <= maxY; y += GLYPH_STEP) drawGlyph(ctx, seg.x1, y, color, seg.main, time, ms);
+      } else {
+        [0.3, 0.7].forEach(function (t) {
+          var u = 1 - t;
+          var px = u * u * u * seg.x1 + 3 * u * u * t * seg.x1 + 3 * u * t * t * seg.x2 + t * t * t * seg.x2;
+          var py = u * u * u * seg.y1 + 3 * u * u * t * (seg.y1 + 8) + 3 * u * t * t * (seg.y2 - 8) + t * t * t * seg.y2;
+          drawGlyph(ctx, px, py, color, seg.main, time, ms);
+        });
+      }
+    });
+    rails.nodes.forEach(function (node) {
+      if (node.y < top || node.y > bottom) return;
+      var color = railColor(rails, node.color);
+      if (rails.hover === node) {
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = "#d8ffe6";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, 9, 0, 6.2832);
+        ctx.stroke();
+      }
+      ctx.shadowColor = color;
+      ctx.shadowBlur = node.main ? 5 : 2;
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.main ? 4.4 : 3.4, 0, 6.2832);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      if (node.born) {
+        var age = (performance.now() - node.born) / 1400;
+        if (age < 3) {
+          var phase = age % 1;
+          ctx.globalAlpha = 0.6 * (1 - phase);
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, 5 + phase * 10, 0, 6.2832);
+          ctx.stroke();
+        }
+      }
+    });
+    ctx.globalAlpha = 1;
+  }
+  window.requestAnimationFrame(gitFrame);
+
+  // Hovering a commit node opens a bubble with its data; it closes when the
+  // pointer leaves the node. Text only, never markup.
+  var gitTip = null;
+  function gitTooltip() {
+    if (!gitTip) {
+      gitTip = el("div", "git-tip");
+      gitTip.setAttribute("role", "tooltip");
+      document.body.appendChild(gitTip);
+    }
+    return gitTip;
+  }
+  function hideGitTip() {
+    if (gitRails) gitRails.hover = null;
+    if (gitTip) gitTip.classList.remove("is-open");
+  }
+  function fillGitTip(tip, commit) {
+    clear(tip);
+    var refs = (commit.refs || []).map(function (ref) {
+      return ref.name;
+    });
+    tip.appendChild(el("div", "tip-head", commit.shortSha + (refs.length ? "  ·  " + refs.join(", ") : "")));
+    var english = commit.subject || "";
+    var shown = commit.subjectEs || english || "(sin asunto)";
+    tip.appendChild(el("div", "tip-subject", shown));
+    if (commit.subjectEs && english && commit.subjectEs !== english) tip.appendChild(el("div", "tip-dim", english));
+    var when = new Date(commit.time);
+    var stamp = Number.isFinite(when.getTime()) ? when.toLocaleString("es-AR") + "  ·  " + relativeTime(commit.time) : "";
+    if (stamp) tip.appendChild(el("div", "tip-dim", stamp));
+    var parents = (commit.parents || []).length;
+    tip.appendChild(el("div", "tip-dim", "padres: " + parents + (parents > 1 ? "  ·  merge" : "") + "  ·  " + commit.sha));
+  }
+  function onGitHover(event) {
+    var rails = gitRails;
+    if (!rails || !rails.nodes.length) return;
+    var rect = event.currentTarget.getBoundingClientRect();
+    var x = event.clientX - rect.left;
+    var y = event.clientY - rect.top;
+    var best = null;
+    var bestDistance = 100;
+    rails.nodes.forEach(function (node) {
+      var distance = (node.x - x) * (node.x - x) + (node.y - y) * (node.y - y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = node;
+      }
+    });
+    if (!best) {
+      hideGitTip();
+      return;
+    }
+    rails.hover = best;
+    var tip = gitTooltip();
+    fillGitTip(tip, best.commit);
+    tip.classList.add("is-open");
+    var left = event.clientX + 14;
+    var topPos = event.clientY + 14;
+    left = Math.max(4, Math.min(left, window.innerWidth - tip.offsetWidth - 4));
+    topPos = Math.max(4, Math.min(topPos, window.innerHeight - tip.offsetHeight - 4));
+    tip.style.left = left + "px";
+    tip.style.top = topPos + "px";
+  }
+  (function bindGitHover() {
+    var canvas = document.getElementById("git-lines");
+    if (!canvas) return;
+    canvas.addEventListener("mousemove", onGitHover);
+    canvas.addEventListener("mouseleave", hideGitTip);
+  })();
+
+  // A day change inserts one separator row; the lanes alive at that point keep
+  // running straight through it.
+  function drawGap(rails, previous, row) {
+    var after = (previous && previous.lanesAfter) || [];
+    after.forEach(function (sha, lane) {
+      if (sha === null || sha === undefined) return;
+      var main = (previous.laneMainAfter || [])[lane] === true;
+      svgLine(rails, laneX(lane), row * ROW_H, laneX(lane), (row + 1) * ROW_H, laneColor(previous, lane), main);
+    });
   }
   function renderGit(git) {
     var list = document.getElementById("git-commits");
-    var svg = document.getElementById("git-lines");
+    var canvas = document.getElementById("git-lines");
     var meta = document.getElementById("git-meta");
     clear(list);
-    clear(svg);
+    var rails = { segs: [], nodes: [], width: 0, height: 0, colors: {}, dpr: window.devicePixelRatio || 1, hover: null };
+    gitRails = rails;
+    hideGitTip();
     meta.textContent = "";
     var commits = (git && git.commits) || [];
     if (!commits.length) {
+      canvas.width = 0;
+      canvas.height = 0;
       list.appendChild(el("li", "git-empty", (git && git.error) || "sin datos"));
       return;
     }
@@ -1578,16 +1912,59 @@
     });
     var graphW = PAD_X * 2 + (laneCount - 1) * LANE_W;
     list.style.setProperty("--graph-w", graphW + "px");
-    svg.setAttribute("width", graphW);
-    svg.setAttribute("height", commits.length * ROW_H);
-    svg.setAttribute("viewBox", "0 0 " + graphW + " " + commits.length * ROW_H);
-    commits.forEach(function (commit, index) {
+    var row = 0;
+    var previous = null;
+    var previousDay = null;
+    commits.forEach(function (commit) {
       var isNew = Boolean(commit.__isNew);
       commit.__isNew = false;
-      drawCommit(svg, commit, index, isNew);
+      var day = dayLabel(commit.time);
+      if (day !== previousDay) {
+        if (previous) drawGap(rails, previous, row);
+        list.appendChild(daySeparator(day));
+        row += 1;
+        previousDay = day;
+      }
+      drawCommit(rails, commit, row, isNew);
       list.appendChild(commitRow(commit, isNew));
+      previous = commit;
+      row += 1;
     });
+    rails.width = graphW;
+    rails.height = row * ROW_H;
+    canvas.width = Math.ceil(graphW * rails.dpr);
+    canvas.height = Math.ceil(rails.height * rails.dpr);
+    canvas.style.width = graphW + "px";
+    canvas.style.height = rails.height + "px";
     meta.textContent = "· " + commits.length + " commits";
+  }
+
+  // Once the agents fill row 1 and start row 2, the tree is the last cell of
+  // the grid, spanning the free slots of the last row while at least one is free
+  // (the compact size of a worker card is enough); otherwise it is the
+  // full-width panel under the cards and the page scrolls if it does not fit.
+  function applyGitLayout() {
+    var git = document.getElementById("git-section");
+    var workers = document.getElementById("workers");
+    var app = document.querySelector(".app");
+    var style = window.getComputedStyle(workers);
+    var gap = parseFloat(style.columnGap) || 0;
+    var columns = Math.max(1, Math.floor((workers.clientWidth + gap) / (GRID_MIN_CARD_PX + gap)));
+    var cards = Array.prototype.filter.call(workers.children, function (child) {
+      return child !== git && !child.classList.contains("is-leaving");
+    }).length;
+    // Row 1 belongs to the agents: until they spill into row 2 the tree is the
+    // full-width panel below them.
+    var free = cards <= columns || cards % columns === 0 ? 0 : columns - (cards % columns);
+    if (free > 0) {
+      git.classList.add("card");
+      git.style.setProperty("--git-span", String(free));
+      workers.appendChild(git);
+    } else {
+      git.classList.remove("card");
+      git.style.removeProperty("--git-span");
+      if (git.parentNode !== app || app.lastElementChild !== git) app.appendChild(git);
+    }
   }
 
   function renderNotices(notices) {
@@ -1598,55 +1975,18 @@
     });
   }
 
-  // Free space a full-width git panel would get, measured from the actual
-  // layout: the app's content box minus every other row and the flex gaps.
-  function measurePanelSpace() {
-    var app = document.querySelector(".app");
-    var appStyle = window.getComputedStyle(app);
-    var workers = document.getElementById("workers");
-    var git = document.getElementById("git-section");
-    var content = app.clientHeight
-      - (parseFloat(appStyle.paddingTop) || 0)
-      - (parseFloat(appStyle.paddingBottom) || 0);
-    var others = 0;
-    Array.prototype.slice.call(app.children).forEach(function (child) {
-      if (child !== workers && child !== git) others += child.offsetHeight;
-    });
-    var workersHeight;
-    if (gitMode === "card" && git.parentNode === workers) {
-      // Out of the grid flow only while measuring, so the grid is sized as if
-      // the card were already gone.
-      git.classList.add("is-measuring");
-      workersHeight = workers.offsetHeight;
-      git.classList.remove("is-measuring");
-    } else {
-      workersHeight = workers.offsetHeight;
-    }
-    // The hypothetical panel adds one row to the app column; every row keeps
-    // one gap.
-    var rows = app.children.length + (git.parentNode === workers ? 1 : 0);
-    var gap = parseFloat(appStyle.rowGap || appStyle.gap) || 0;
-    return content - others - workersHeight - gap * (rows - 1);
-  }
-
-  // Moves the tree between the full-width panel and the first worker card.
-  function applyGitLayout() {
-    var git = document.getElementById("git-section");
-    var workers = document.getElementById("workers");
-    var app = document.querySelector(".app");
-    var next = gitCardMode(measurePanelSpace(), window.innerHeight, gitMode);
-    gitMode = next;
-    if (next === "card") {
-      git.classList.add("card");
-      if (git.parentNode !== workers) workers.insertBefore(git, workers.firstChild);
-    } else {
-      git.classList.remove("card");
-      if (git.parentNode !== app) app.appendChild(git);
-    }
-  }
-
+  var pageBuild = null;
   function render(next) {
     snapshot = next;
+    // The server says which build of the page it serves; an open tab running
+    // older code reloads itself instead of drifting from the server.
+    if (next.buildId) {
+      if (pageBuild === null) pageBuild = next.buildId;
+      else if (next.buildId !== pageBuild) {
+        window.location.reload();
+        return;
+      }
+    }
     // The server names the project it answered for; keep the picker in sync
     // (first poll, or a fallback after an unknown id).
     if (next.project && next.project.id && next.project.id !== projectId) {
@@ -1664,6 +2004,9 @@
     var orchestrator = next.orchestrator || {};
     document.getElementById("orch-model").textContent = orchestrator.text || "";
     document.getElementById("orch").title = [orchestrator.label, orchestrator.engine].filter(Boolean).join(" · ");
+    var ui = next.ui || {};
+    document.getElementById("usage").hidden = ui.showUsage !== true;
+    document.getElementById("pc").hidden = ui.showPc !== true;
     renderUsage(next.usages);
     renderWorkers(next.workers, next.hiddenWorkers, next.hiddenFinished, next.activityLines, next.activityLinesTotal);
     renderPc(next.pc);
