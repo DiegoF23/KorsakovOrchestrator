@@ -267,9 +267,10 @@ test("every registered theme has the same complete token keyset and early first-
   assert.deepEqual(themes, [
     { id: "matrix", name: "Matrix", background: '"matrix-rain"' },
     { id: "claude-desktop", name: "Claude Desktop", background: "null" },
-    { id: "bash", name: "Terminal Bash", background: "null" }
+    { id: "bash", name: "Terminal Bash", background: "null" },
+    { id: "jarvis", name: "JARVIS", background: '"jarvis-hud"' }
   ]);
-  assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"']);
+  assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"', '"jarvis"']);
   const expected = byTheme.get("matrix");
   for (const theme of themes) {
     assert.ok(byTheme.has(theme.id), `${theme.id} has a CSS token block`);
