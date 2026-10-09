@@ -591,3 +591,35 @@ test("OpenCode sessions of the project folder become cards, newest title once, s
   assert.equal(tracks[0].__state, "working");
   assert.equal(tracks[0].model, "opencode-go/longcat-2.5-preview-free");
 });
+
+test("Codex runs launched in the repo or its worktrees become cards, finished ones read as done", async () => {
+  const { recentCodexRuns, codexRunTracks } = await import("../lib/state.mjs");
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "codexrun-"));
+  const repo = path.join(base, "my-repo");
+  const worktree = path.join(base, "my-repo-worktrees", "themes");
+  const sessions = path.join(base, "sessions");
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  const day = path.join(sessions, String(now.getFullYear()), pad(now.getMonth() + 1), pad(now.getDate()));
+  fs.mkdirSync(day, { recursive: true });
+  const nl = String.fromCharCode(10);
+  const rollout = (name, cwd, extra) => {
+    const lines = [
+      { type: "session_meta", payload: { cwd } },
+      { type: "turn_context", payload: { cwd, model: "gpt-6.1-sol", effort: "high" } },
+      { type: "response_item", payload: { role: "user", content: [{ text: "# AGENTS.md instructions" }, { text: "# Task: add two themes" }] } },
+      ...extra
+    ];
+    fs.writeFileSync(path.join(day, name), lines.map((line) => JSON.stringify(line)).join(nl) + nl);
+  };
+  rollout("rollout-2026-10-08T10-00-00-aaaaaaaa-1111-2222-3333-444444444444.jsonl", worktree, [{ type: "event_msg", payload: { type: "task_started" } }]);
+  rollout("rollout-2026-10-08T10-00-01-bbbbbbbb-1111-2222-3333-444444444444.jsonl", repo, [{ type: "event_msg", payload: { type: "task_started" } }, { type: "event_msg", payload: { type: "task_complete" } }]);
+  rollout("rollout-2026-10-08T10-00-02-cccccccc-1111-2222-3333-444444444444.jsonl", path.join(base, "elsewhere"), []);
+  const runs = recentCodexRuns(sessions, { repo }, now);
+  assert.equal(runs.length, 2);
+  const tracks = codexRunTracks(runs, { repo }, now);
+  const states = tracks.map((track) => track.__state).sort();
+  assert.deepEqual(states, ["done", "working"]);
+  assert.equal(tracks[0].title, "Task: add two themes".replace(/^Task: /, ""));
+  assert.equal(tracks[0].discoveredModel, "gpt-6.1-sol");
+});

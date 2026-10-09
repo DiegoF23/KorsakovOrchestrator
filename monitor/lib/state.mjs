@@ -633,6 +633,197 @@ export function openCodeSessionTracks(sessions, project, kit, now = new Date()) 
   return out;
 }
 
+// -- Codex runs --------------------------------------------------------------
+// Codex keeps one rollout per session in <sessionsDir>/YYYY/MM/DD/. Its first
+// line records the working folder, so a run launched by hand ("codex exec -C
+// <folder>") belongs to a project when that folder is the repo or one of the
+// worktrees next to it (<repo>-worktrees\*). Turned off with
+// "codexDiscovery": false.
+const CODEX_RECENT_MS = 60 * 60000;
+const CODEX_WORKING_MS = 3 * 60000;
+// A Codex run that spawned sub-agents sits idle while it waits for them (a
+// wait call lasts minutes), so an unfinished turn is "waiting", not done, for
+// this long after its last event.
+const CODEX_WAITING_MS = 20 * 60000;
+// The first lines of a rollout carry the whole instruction set, so the head to
+// read is big; the result is cached per file once complete.
+const CODEX_HEAD_BYTES = 4 * 1024 * 1024;
+const codexInfoCache = new Map();
+const CODEX_TAIL_BYTES = 65536;
+const CODEX_MAX_RUNS = 6;
+const codexCache = new Map();
+
+function codexDayFolders(sessionsDir, now) {
+  const folders = [];
+  for (const back of [0, 1]) {
+    const day = new Date(now.getTime() - back * 86400000);
+    const pad = (value) => String(value).padStart(2, "0");
+    folders.push(path.join(sessionsDir, String(day.getFullYear()), pad(day.getMonth() + 1), pad(day.getDate())));
+  }
+  return folders;
+}
+
+function codexRunInfo(file) {
+  const known = codexInfoCache.get(file);
+  if (known) return known;
+  const head = readFileHead(file, CODEX_HEAD_BYTES);
+  if (!head) return null;
+  let cwd = null;
+  let model = null;
+  let effort = null;
+  let title = "";
+  let agentPath = null;
+  let agentRole = null;
+  let parentId = null;
+  for (const line of head.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (entry?.type === "session_meta" && !cwd) {
+      cwd = entry.payload?.cwd ?? null;
+      agentPath = entry.payload?.agent_path ?? null;
+      agentRole = entry.payload?.agent_role ?? null;
+      parentId = entry.payload?.parent_thread_id ?? null;
+    }
+    if (entry?.type === "turn_context") {
+      cwd = cwd ?? entry.payload?.cwd ?? null;
+      model = model ?? entry.payload?.model ?? null;
+      effort = effort ?? entry.payload?.effort ?? entry.payload?.reasoning_effort ?? null;
+    }
+    if (!title && entry?.type === "response_item" && entry.payload?.role === "user") {
+      for (const part of entry.payload.content ?? []) {
+        const text = String(part?.text ?? "").trim();
+        if (!text || text.startsWith("# AGENTS.md") || text.startsWith("<")) continue;
+        const first = text.split(/\r?\n/).map((piece) => piece.trim()).find(Boolean) ?? "";
+        title = first.replace(/^#+\s*/, "").replace(/^(task|title):\s*/i, "").slice(0, 80);
+        if (title) break;
+      }
+    }
+  }
+  // A sub-agent Codex spawned has no prompt of its own: name it by its role and
+  // task name ("explorer: theme map").
+  if (!title && agentPath) {
+    const task = String(agentPath).split("/").filter(Boolean).pop() ?? "";
+    title = `${agentRole ?? "agente"}: ${task.replace(/_/g, " ")}`.slice(0, 80);
+  }
+  const info = {
+    cwd,
+    model,
+    effort,
+    title,
+    parentId,
+    subTask: agentPath ? String(agentPath).split("/").filter(Boolean).pop()?.replace(/_/g, " ") ?? null : null,
+    subRole: agentRole
+  };
+  if (cwd && model && title) codexInfoCache.set(file, info);
+  return info;
+}
+
+// While Codex keeps a rollout open, Windows does not refresh its mtime and size,
+// so the run is judged from the file tail itself: the last event timestamp and
+// whether the turn already completed.
+function codexTail(file) {
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, CODEX_TAIL_BYTES);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      const text = buffer.toString("utf8");
+      let last = null;
+      for (const match of text.matchAll(/"timestamp":"([^"]+)"/g)) last = match[1];
+      const lastMs = last ? new Date(last).getTime() : NaN;
+      return {
+        lastEventMs: Number.isFinite(lastMs) ? lastMs : null,
+        finished: text.lastIndexOf('"type":"task_complete"') > text.lastIndexOf('"type":"task_started"')
+      };
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return { lastEventMs: null, finished: false };
+  }
+}
+
+export function recentCodexRuns(sessionsDir, project, now = new Date()) {
+  if (!sessionsDir || !project?.repo) return [];
+  const key = `${sessionsDir}|${normalizeFolder(project.repo)}`;
+  const cached = codexCache.get(key);
+  if (cached && now.getTime() - cached.at < 4000) return cached.runs;
+  const wanted = normalizeFolder(project.repo);
+  const worktrees = wanted + "-worktrees" + path.sep;
+  const found = [];
+  for (const folder of codexDayFolders(sessionsDir, now)) {
+    let names;
+    try {
+      names = fs.readdirSync(folder);
+    } catch {
+      continue;
+    }
+    for (const name of names) {
+      if (!name.startsWith("rollout-") || !name.endsWith(".jsonl")) continue;
+      const file = path.join(folder, name);
+      let stat;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        continue;
+      }
+      const tail = codexTail(file);
+      const activityMs = Math.max(stat.mtimeMs, tail.lastEventMs ?? 0);
+      if (now.getTime() - activityMs > CODEX_RECENT_MS) continue;
+      const info = codexRunInfo(file);
+      if (!info?.cwd) continue;
+      const cwd = normalizeFolder(info.cwd);
+      if (cwd !== wanted && !cwd.startsWith(worktrees)) continue;
+      const id = name.slice(0, -".jsonl".length).split("-").slice(-5).join("-");
+      found.push({ id, file, mtimeMs: activityMs, finished: tail.finished, ...info });
+    }
+  }
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  // A sub-agent names the task of the run that spawned it, so the card reads as
+  // "theme writer (worker) — <parent task>" and not as an orphan.
+  const byId = new Map(found.map((run) => [run.id, run]));
+  for (const run of found) {
+    const parent = run.parentId ? byId.get(run.parentId) : null;
+    if (parent?.title && run.subTask) run.title = `${run.subTask} (${run.subRole ?? "agente"}) — ${parent.title}`.slice(0, 120);
+  }
+  const runs = found.slice(0, CODEX_MAX_RUNS);
+  codexCache.set(key, { at: now.getTime(), runs });
+  return runs;
+}
+
+export function codexRunTracks(runs, project, now = new Date()) {
+  return (runs ?? []).map((run) => {
+    const quiet = now.getTime() - run.mtimeMs;
+    const state = run.finished
+      ? "done"
+      : quiet <= CODEX_WORKING_MS
+        ? "working"
+        : quiet <= CODEX_WAITING_MS
+          ? "waiting"
+          : "done";
+    return {
+      name: `cx-${String(run.id).slice(0, 8)}`,
+      engine: "codex",
+      title: run.title || "Sesión de Codex",
+      label: "Codex",
+      workdir: project.repo,
+      activityFile: run.file,
+      branch: "main",
+      discoveredModel: run.model ?? undefined,
+      discoveredEffort: run.effort ?? undefined,
+      __state: state,
+      __statusTime: new Date(run.mtimeMs).toISOString()
+    };
+  });
+}
+
 // -- Antigravity (agy) CLI runs ----------------------------------------------
 // An orchestrator may launch Gemini through the Antigravity CLI directly,
 // without registering a kit track; the monitor then has to discover the run by
@@ -830,7 +1021,11 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
     config?.opencodeDiscovery === false
       ? []
       : openCodeSessionTracks(openCodeCache.get(normalizeFolder(project.repo))?.sessions, project, kit, now);
-  if (!sessions.length && !subagents.length && !conversations.length && !openCodeTracks.length) return kit;
+  const codexTracks =
+    config?.codexDiscovery === false
+      ? []
+      : codexRunTracks(recentCodexRuns(expandVars(String(config?.codex?.sessionsDir ?? "~/.codex/sessions")), project, now), project, now);
+  if (!sessions.length && !subagents.length && !conversations.length && !openCodeTracks.length && !codexTracks.length) return kit;
   const batchKeys = assignBatches(subagents);
   const subagentTracks = subagents.map((agent) => {
     const answered = transcriptTurnComplete(agent.file, agent.mtimeMs, now.getTime());
@@ -897,7 +1092,7 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
   return {
     ...(kit ?? {}),
     server: kit?.server ?? (openCodeTracks.length ? openCodeServer(config) : undefined),
-    tracks: [...subagentTracks, ...tracks, ...agyTracks, ...openCodeTracks, ...(kit?.tracks ?? [])]
+    tracks: [...subagentTracks, ...tracks, ...agyTracks, ...openCodeTracks, ...codexTracks, ...(kit?.tracks ?? [])]
   };
 }
 
@@ -1178,6 +1373,7 @@ export function workerState(status, now, pidAlive = isPidAlive) {
 export function modelText(engine, kit, config, track = {}) {
   const model = kit?.model ?? {};
   if (engine === "codex") {
+    if (track?.discoveredModel) return modelLabel(String(track.discoveredModel), track.discoveredEffort ?? "");
     return modelLabel(model.codex, model.codexEffort);
   }
   if (engine === "claude-code") {

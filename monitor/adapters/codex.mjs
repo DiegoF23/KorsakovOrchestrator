@@ -753,9 +753,9 @@ function codexPlanTodos(args) {
 
 export async function activity(worker, ctx = {}) {
   const kitDir = ctx.kitDir;
-  if (!kitDir || !worker?.name) return { events: [], notice: "sin actividad visible" };
+  if ((!kitDir && !worker?.activityFile) || !worker?.name) return { events: [], notice: "sin actividad visible" };
   try {
-    const newest = newestLogFile(kitDir, worker.name);
+    const newest = pickCodexLog(worker, kitDir);
     if (!newest) return { events: [], notice: "todavía no hay log" };
     const at = new Date(newest.mtimeMs).toISOString();
     const events = [];
@@ -771,6 +771,9 @@ export async function activity(worker, ctx = {}) {
       entries.push(event);
       for (const mapped of mapCodexLogLine(event, ctx)) events.push({ time: at, ...mapped });
     }
+    // A raw rollout (a run discovered without a kit log) carries its calls in
+    // another envelope: derive the short lines from the typed steps.
+    if (!events.length && worker.activityFile) events.push(...rolloutEvents(entries, ctx, at));
     const { progress, lastStepAt } = progressFromEntries(entries, { fallbackTime: at });
     return withActivityProgress({ events: events.slice(-15), notice: events.length ? null : "sin eventos" }, progress, lastStepAt);
   } catch {
@@ -782,9 +785,9 @@ export async function activity(worker, ctx = {}) {
 // 15-event trim of the activity card.
 export async function steps(worker, ctx = {}) {
   const kitDir = ctx.kitDir;
-  if (!kitDir || !worker?.name) return { steps: [], notice: "sin actividad visible" };
+  if ((!kitDir && !worker?.activityFile) || !worker?.name) return { steps: [], notice: "sin actividad visible" };
   try {
-    const newest = newestLogFile(kitDir, worker.name);
+    const newest = pickCodexLog(worker, kitDir);
     if (!newest) return { steps: [], notice: "todavía no hay log" };
     const entries = [];
     for (const line of readTail(newest.full, STEPS_TAIL_MAX_BYTES).split(/\r?\n/)) {
@@ -800,6 +803,32 @@ export async function steps(worker, ctx = {}) {
   } catch {
     return { steps: [], notice: "sin actividad visible" };
   }
+}
+
+const ROLLOUT_EVENT_KIND = { message: "MSG", command: "CMD", write: "EDIT", edit: "EDIT", multiedit: "EDIT", read: "READ", memory: "MSG", tool: "MSG" };
+
+function rolloutEvents(entries, ctx, fallbackTime) {
+  const out = [];
+  for (const step of mapCodexSteps(entries, ctx)) {
+    const kind = ROLLOUT_EVENT_KIND[step.type];
+    const raw = step.type === "command" ? step.data?.command || step.title : step.title;
+    const detail = shortText(String(raw ?? "").replace(/^comando:s*/, ""));
+    if (kind && detail) out.push({ time: step.time || fallbackTime, kind, detail });
+  }
+  return out;
+}
+
+// A run the monitor discovered on its own (no kit track) names its rollout file
+// directly; a kit track still reads its newest log-<track>-*.jsonl.
+function pickCodexLog(worker, kitDir) {
+  if (worker?.activityFile) {
+    try {
+      return { full: worker.activityFile, mtimeMs: fs.statSync(worker.activityFile).mtimeMs };
+    } catch {
+      return null;
+    }
+  }
+  return newestLogFile(kitDir, worker.name);
 }
 
 function newestLogFile(kitDir, name) {
