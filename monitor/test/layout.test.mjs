@@ -267,7 +267,8 @@ test("every registered theme has the same complete token keyset and early first-
   assert.deepEqual(themes, [
     { id: "matrix", name: "Matrix", background: '"matrix-rain"' },
     { id: "claude-desktop", name: "Claude Desktop", background: "null" },
-    { id: "bash", name: "Terminal Bash", background: "null" }
+    { id: "bash", name: "Terminal Bash", background: "null" },
+    { id: "vscode", name: "VSCode", background: '"vscode-ghost"' }
   ]);
   assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"']);
   const expected = byTheme.get("matrix");
@@ -545,7 +546,7 @@ test("the git graph stays visible in card mode and commit nodes open a hover bub
 });
 
 test("each theme picks the look of the git rails through --rail-style", () => {
-  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii" };
+  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii", vscode: "ring" };
   for (const [id, style] of Object.entries(styles)) {
     const block = html.slice(html.indexOf(`:root[data-theme="${id}"]`));
     const own = block.slice(0, block.indexOf("\n  }"));

@@ -163,6 +163,22 @@
     --git-node-flash-opacity: 0.6;
     --git-font: 9px Consolas, monospace;
     --git-main-font: bold 11px Consolas, monospace;
+    --scene-editor: var(--code-bg);
+    --scene-panel: var(--panel);
+    --scene-border: var(--border);
+    --scene-text: var(--code-text);
+    --scene-dim: var(--dim);
+    --scene-keyword: var(--code-keyword);
+    --scene-string: var(--code-string);
+    --scene-function: var(--code-function);
+    --scene-number: var(--code-number);
+    --scene-type: var(--warn);
+    --scene-error: var(--err);
+    --scene-cyan: var(--wait);
+    --scene-accent: var(--live);
+    --scene-mono-font: var(--font);
+    --scene-title-font: var(--font-title);
+    --scene-transparent: transparent;
   }
   :root[data-theme="matrix"] {
     --bg: #000;
@@ -289,6 +305,22 @@
     --git-node-flash-opacity: 0.6;
     --git-font: 9px Consolas, monospace;
     --git-main-font: bold 11px Consolas, monospace;
+    --scene-editor: var(--code-bg);
+    --scene-panel: var(--panel);
+    --scene-border: var(--border);
+    --scene-text: var(--code-text);
+    --scene-dim: var(--dim);
+    --scene-keyword: var(--code-keyword);
+    --scene-string: var(--code-string);
+    --scene-function: var(--code-function);
+    --scene-number: var(--code-number);
+    --scene-type: var(--warn);
+    --scene-error: var(--err);
+    --scene-cyan: var(--wait);
+    --scene-accent: var(--live);
+    --scene-mono-font: var(--font);
+    --scene-title-font: var(--font-title);
+    --scene-transparent: transparent;
   }
   :root[data-theme="claude-desktop"] {
     --bg: #262624;
@@ -415,6 +447,22 @@
     --git-shadow-node-branch: 0;
     --git-shadow-reset: 0;
     --git-node-flash-opacity: 0;
+    --scene-editor: var(--code-bg);
+    --scene-panel: var(--panel);
+    --scene-border: var(--border);
+    --scene-text: var(--code-text);
+    --scene-dim: var(--dim);
+    --scene-keyword: var(--code-keyword);
+    --scene-string: var(--code-string);
+    --scene-function: var(--code-function);
+    --scene-number: var(--code-number);
+    --scene-type: var(--warn);
+    --scene-error: var(--err);
+    --scene-cyan: var(--wait);
+    --scene-accent: var(--live);
+    --scene-mono-font: var(--font);
+    --scene-title-font: var(--font-title);
+    --scene-transparent: transparent;
   }
   :root[data-theme="bash"] {
     --bg: #000000;
@@ -541,13 +589,171 @@
     --git-shadow-node-branch: 0;
     --git-shadow-reset: 0;
     --git-node-flash-opacity: 0;
+    --scene-editor: var(--code-bg);
+    --scene-panel: var(--panel);
+    --scene-border: var(--border);
+    --scene-text: var(--code-text);
+    --scene-dim: var(--dim);
+    --scene-keyword: var(--code-keyword);
+    --scene-string: var(--code-string);
+    --scene-function: var(--code-function);
+    --scene-number: var(--code-number);
+    --scene-type: var(--warn);
+    --scene-error: var(--err);
+    --scene-cyan: var(--wait);
+    --scene-accent: var(--live);
+    --scene-mono-font: var(--font);
+    --scene-title-font: var(--font-title);
+    --scene-transparent: transparent;
   }
 
   /* theme-slot:naruto-css */
 
   /* ---- */
 
-  /* theme-slot:vscode-css */
+  /* theme-slot:vscode-css source slot: VSCode theme */
+:root[data-theme="vscode"] {
+    --bg: #282c34;
+    --card: rgba(33, 37, 43, 0.64);
+    --panel: rgba(33, 37, 43, 0.58);
+    --rain-opacity: 0.85;
+    --live: #98c379;
+    --live-text: #98c379;
+    --live-rgb: 152, 195, 121;
+    --text: #abb2bf;
+    --dim: #abb2bf;
+    --dim-rgb: 171, 178, 191;
+    --warn: #e5c07b;
+    --warn-rgb: 229, 192, 123;
+    --err: #e06c75;
+    --err-rgb: 224, 108, 117;
+    --work: #e5c07b;
+    --work-rgb: 229, 192, 123;
+    --wait: #56b6c2;
+    --wait-rgb: 86, 182, 194;
+    --stale: #5c6370;
+    --stale-rgb: 92, 99, 112;
+    --border: #333842;
+    --on-warn: #282c34;
+    --on-crit: #282c34;
+    --mask-fill: rgba(40, 44, 52, 0.92);
+    --scanline: transparent;
+    --scrollbar: #282c34;
+    --scrollbar-thumb: #5c6370;
+    --tron-head-rgb: 77, 120, 204;
+    --glow-title: none;
+    --glow-live: none;
+    --glow-work: none;
+    --glow-done: none;
+    --glow-error: none;
+    --glow-waiting: none;
+    --glow-stale: none;
+    --glow-commit: none;
+    --glow-done-static: none;
+    --glow-error-static: none;
+    --rain-glyph: currentColor;
+    --rain-trail: transparent;
+    --rain-font: 14px 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', Consolas, monospace;
+    --rail-style: ring;
+    --rail-font: 600 13px 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', Consolas, monospace;
+    --branch-0: #4d78cc;
+    --branch-1: #61afef;
+    --branch-2: #56b6c2;
+    --branch-3: #98c379;
+    --branch-4: #e5c07b;
+    --branch-5: #d19a66;
+    --branch-6: #c678dd;
+    --branch-7: #e06c75;
+    --branch-neutral: #abb2bf;
+    --code-bg: var(--scene-editor);
+    --code-text: #abb2bf;
+    --code-keyword: #c678dd;
+    --code-string: #98c379;
+    --code-comment: #5c6370;
+    --code-number: #d19a66;
+    --code-function: #61afef;
+    --git-fallback: #4d78cc;
+    --git-glint: transparent;
+    --code-added-bg: rgba(152, 195, 121, 0.12);
+    --code-removed-bg: rgba(224, 108, 117, 0.12);
+    --ansi-0: #282c34;
+    --ansi-1: #e06c75;
+    --ansi-2: #98c379;
+    --ansi-3: #e5c07b;
+    --ansi-4: #61afef;
+    --ansi-5: #c678dd;
+    --ansi-6: #56b6c2;
+    --ansi-7: #abb2bf;
+    --ansi-8: #5c6370;
+    --ansi-9: #e06c75;
+    --ansi-10: #98c379;
+    --ansi-11: #e5c07b;
+    --ansi-12: #61afef;
+    --ansi-13: #c678dd;
+    --ansi-14: #56b6c2;
+    --ansi-15: #ffffff;
+    --font: 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', Consolas, monospace;
+    --font-display: 'Segoe UI', system-ui, sans-serif;
+    --font-title: 'Segoe UI', system-ui, sans-serif;
+    --title-color: #abb2bf;
+    --title-image: none;
+    --radius-1: 6px;
+    --radius-2: 6px;
+    --radius-3: 6px;
+    --radius-4: 6px;
+    --radius-5: 6px;
+    --scanline-effect: none;
+    --tron-display: none;
+    --font-ui: 'Segoe UI', system-ui, sans-serif;
+    --git-font: 600 13px 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', Consolas, monospace;
+    --git-main-font: 700 14px 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', Consolas, monospace;
+    --glow-tooltip: none;
+    --glow-tab-active: none;
+    --glow-card-in-start-filter: none;
+    --glow-card-in-flash-shadow: none;
+    --glow-card-in-flash-filter: none;
+    --glow-card-out-flash-filter: none;
+    --glow-card-out-flash-shadow: none;
+    --glow-card-out-end-filter: none;
+    --glow-node-flash-start-filter: none;
+    --glow-node-flash-mid-filter: none;
+    --glow-node-flash-end-filter: none;
+    --animation-critical-blink: none;
+    --animation-tron-border: none;
+    --animation-progress-pulse: none;
+    --animation-card-in: none;
+    --animation-card-out: none;
+    --animation-commit-in: none;
+    --animation-node-flash: none;
+    --animation-terminal-cursor: none;
+    --animation-memory-pulse: none;
+    --animation-think-pulse: none;
+    --animation-live-typing: none;
+    --animation-live-scan: none;
+    --transition-git-tip: none;
+    --git-shadow-main: 0;
+    --git-shadow-branch: 0;
+    --git-shadow-node-main: 0;
+    --git-shadow-node-branch: 0;
+    --git-shadow-reset: 0;
+    --git-node-flash-opacity: 0;
+    --scene-editor: #282c34;
+    --scene-panel: #21252b;
+    --scene-border: #333842;
+    --scene-text: #abb2bf;
+    --scene-dim: #5c6370;
+    --scene-mono-font: 'JetBrains Mono', 'Fira Code', 'Cascadia Mono', Consolas, monospace;
+    --scene-title-font: 'Segoe UI', system-ui, sans-serif;
+    --scene-transparent: transparent;
+    --scene-keyword: #c678dd;
+    --scene-string: #98c379;
+    --scene-function: #61afef;
+    --scene-number: #d19a66;
+    --scene-type: #e5c07b;
+    --scene-error: #e06c75;
+    --scene-cyan: #56b6c2;
+    --scene-accent: #4d78cc;
+  }
 
   /* ---- */
 
@@ -1443,7 +1649,7 @@
     { id: "bash", name: "Terminal Bash", background: null },
     // theme-slot:naruto
     // ----
-    // theme-slot:vscode
+    { id: "vscode", name: "VSCode", background: "vscode-ghost" },
     // ----
     // theme-slot:jarvis
   ];
@@ -1455,7 +1661,7 @@
     // ----
     // theme-slot:naruto
     // ----
-    // theme-slot:vscode
+    "vscode-ghost": "/js/bg-vscode-ghost.mjs",
     // ----
     // theme-slot:jarvis
   };
