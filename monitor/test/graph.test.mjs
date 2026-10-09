@@ -62,12 +62,12 @@ test("linear history assigns every commit to lane 0", () => {
   assert.equal(rows[0].laneCount, 1);
 });
 
-test("a merge opens a second lane for the merged branch and closes it at the common parent", () => {
+test("a merge opens a second lane for the merged branch and keeps it until the common parent", () => {
   const commits = parseGitLog(read("git-log-merge.txt"));
   const rows = assignLanes(commits);
   assert.deepEqual(
     rows.map((row) => `${row.sha}:${row.lane}`),
-    ["M:0", "B:1", "A:0", "R:1"]
+    ["M:0", "B:1", "A:0", "R:0"]
   );
   assert.equal(rows[0].laneCount, 2);
   const merge = rows[0];
@@ -75,8 +75,10 @@ test("a merge opens a second lane for the merged branch and closes it at the com
     { sha: "A", lane: 0 },
     { sha: "B", lane: 1 }
   ]);
-  const joined = rows[2];
-  assert.deepEqual(joined.parents, [{ sha: "R", lane: 1 }]);
+  // Both lines run down to the common parent; the merged branch curves in there.
+  assert.deepEqual(rows[1].parents, [{ sha: "R", lane: 1 }]);
+  assert.deepEqual(rows[2].parents, [{ sha: "R", lane: 0 }]);
+  assert.deepEqual(rows[3].joins, [1]);
 });
 
 test("two parallel branches keep stable lanes and join at the root", () => {
@@ -86,7 +88,26 @@ test("two parallel branches keep stable lanes and join at the root", () => {
     ["X1:0", "M1:1", "X0:0", "M0:1", "R:0"]
   );
   assert.equal(rows[0].laneCount, 2);
-  assert.deepEqual(rows[3].parents, [{ sha: "R", lane: 0 }]);
+  // Each branch keeps its own line to the root and curves into it there.
+  assert.deepEqual(rows[3].parents, [{ sha: "R", lane: 1 }]);
+  assert.deepEqual(rows[4].joins, [1]);
+});
+
+test("branches whose tips share one parent keep one lane each down to the fork", () => {
+  const nl = String.fromCharCode(10);
+  const rows = assignLanes(
+    parseGitLog(
+      [
+        ["a1", "base", "feat/a", "a", "5"].join("|"),
+        ["b1", "base", "feat/b", "b", "4"].join("|"),
+        ["c1", "base", "feat/c", "c", "3"].join("|"),
+        ["base", "", "main", "base", "2"].join("|")
+      ].join(nl)
+    )
+  );
+  assert.deepEqual(rows.map((row) => row.lane), [0, 1, 2, 0]);
+  assert.equal(rows[0].laneCount, 3);
+  assert.deepEqual(rows[3].joins, [1, 2]);
 });
 
 test("assignLanes tolerates empty histories", () => {

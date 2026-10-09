@@ -159,18 +159,19 @@ export function assignLanes(commits, options = {}) {
     const lanesBefore = active.slice();
     const links = [];
 
-    const firstParent = commit.parents[0] ?? null;
-    const existing = firstParent ? active.indexOf(firstParent) : -1;
-    if (existing !== -1 && existing !== lane) {
-      links.push({ sha: firstParent, lane: existing });
-      active[lane] = null;
-      activeNames[lane] = null;
-    } else {
-      active[lane] = firstParent;
-      if (firstParent) links.push({ sha: firstParent, lane });
-      // A root commit ends its line here.
-      else activeNames[lane] = null;
+    // Every other lane that waits for this very commit is a branch that forks
+    // here: it keeps its own line down to this row and curves into the commit.
+    const joins = [];
+    for (let index = 0; index < active.length; index += 1) {
+      if (index !== lane && active[index] === commit.sha) joins.push(index);
     }
+    for (const index of joins) active[index] = null;
+
+    const firstParent = commit.parents[0] ?? null;
+    active[lane] = firstParent;
+    if (firstParent) links.push({ sha: firstParent, lane });
+    // A root commit ends its line here.
+    else activeNames[lane] = null;
 
     for (const parent of commit.parents.slice(1)) {
       if (!parent) continue;
@@ -190,6 +191,7 @@ export function assignLanes(commits, options = {}) {
 
     width = Math.max(width, lane + 1);
     for (const link of links) width = Math.max(width, link.lane + 1);
+    for (const index of joins) width = Math.max(width, index + 1);
 
     const lanesAfter = active.slice();
     while (lanesAfter.length && lanesAfter[lanesAfter.length - 1] === null) lanesAfter.pop();
@@ -209,7 +211,9 @@ export function assignLanes(commits, options = {}) {
       laneMainAfter.push(mainShas ? mainShas.has(lanesAfter[index]) : laneMain[index]);
     }
     const parentsMain = links.map((link) => (mainShas ? mainShas.has(link.sha) : laneMain[link.lane] === true));
-    rows.push({ ...commit, lane, parents: links, lanesBefore, lanesAfter, laneColors, laneColorIndexes, laneMain, laneMainAfter, parentsMain });
+    // Lanes closed on this row go back to the pool once their curve is drawn.
+    for (const index of joins) activeNames[index] = null;
+    rows.push({ ...commit, lane, parents: links, joins, lanesBefore, lanesAfter, laneColors, laneColorIndexes, laneMain, laneMainAfter, parentsMain });
   }
 
   return rows.map((row) => ({ ...row, laneCount: width }));

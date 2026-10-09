@@ -566,3 +566,8 @@ test("backgrounds in their own file load on demand and receive the agents feed",
   assert.match(html, /theme-slot:vscode-css/);
   assert.match(html, /theme-slot:jarvis/);
 });
+
+test("the narrow git card keeps the branch names visible", () => {
+  assert.doesNotMatch(html, /\.workers > \.git \.commit \.chip\s*\{[^}]*display:\s*none/);
+  assert.match(html, /\.workers > \.git \.commit \.msg \.chip\s*\{[^}]*order:\s*-1/);
+});

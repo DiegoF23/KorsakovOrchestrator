@@ -1018,7 +1018,10 @@
   .workers > .git { --time-w: 66px; }
   .workers > .git .commit, .workers > .git .day-row { height: 20px; font-size: 11px; }
   .workers > .git .ctype, .workers > .git .scope { display: none; }
-  .workers > .git .commit .chip { display: none; }
+  /* Narrow card: the branch names stay (they say which line is which); the
+     short hash is in the hover bubble, so it makes room for them. */
+  .workers > .git .commit .sha { display: none; }
+  .workers > .git .commit .msg .chip { order: -1; flex: 0 1 auto; min-width: 0; max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: 0; }
   /* A card leaves the grid flow only while the page measures the free space. */
   .git.is-measuring { position: absolute; visibility: hidden; left: 0; right: 0; }
   /* Cards enter with a Matrix reveal (top to bottom plus a green flash) and leave collapsing upward. */
@@ -2075,7 +2078,11 @@
       var hasTop = before[lane] !== null && before[lane] !== undefined;
       var hasBottom = after[lane] !== null && after[lane] !== undefined;
       var main = laneIsMain(commit, lane);
-      if (lane === commit.lane) {
+      var joining = (commit.joins || []).indexOf(lane) !== -1;
+      if (joining) {
+        // A branch forking here: its line ends curving into this commit.
+        svgCurve(svg, x, y - PAD_Y, laneX(commit.lane), y, laneColor(commit, lane), main);
+      } else if (lane === commit.lane) {
         if (hasTop) svgLine(svg, x, y - PAD_Y, x, y, laneColor(commit, lane), main);
         if (hasBottom) svgLine(svg, x, y, x, y + PAD_Y, laneColor(commit, lane), main);
       } else if (hasTop || hasBottom) {
