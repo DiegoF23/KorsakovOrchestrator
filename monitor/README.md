@@ -325,7 +325,13 @@ y `~`. Claves:
 | `translate.enabled` | `false` apaga las traducciones y los resúmenes (por defecto, encendidos). |
 | `translate.model` | Modelo del helper (`opencode-go/space-bunny-free` por defecto). |
 | `translate.summarySeconds` | Mínimo entre resúmenes por pista (120 s por defecto). |
-| `cleanup.hideFinishedAfterMinutes` | Minutos de antigüedad a partir de los cuales se ocultan las tarjetas `terminado` o `detenido` (`5` por defecto); `0` o la clave ausente desactivan la limpieza. |
+| `cleanup.hideFinishedAfterMinutes` | Minutos de antigüedad a partir de los cuales se ocultan las tarjetas `terminado` o `detenido` (`5` por defecto; el uso diario recomendado es `2`); `0` o la clave ausente desactivan la limpieza. Un lote de subagentes sale entero cuando el último de sus miembros cumple ese plazo. |
+| `discoverClaudeProjects` | `true` agrega al selector los proyectos que Claude Code conoce (carpeta `~/.claude/projects`); omite scratch, worktrees y carpetas temporales. Apagado por defecto. |
+| `orchestratorSessions` | `true` muestra la tarjeta de la sesión del orquestador de Claude Code (apagado por defecto). |
+| `claudeSubagents` | `false` oculta los subagentes de Claude Code (activados por defecto). Los lanzados juntos se agrupan en una tarjeta de hasta 4 miniaturas. |
+| `opencodeDiscovery` / `opencodeServer` | Descubre las sesiones de OpenCode de cada proyecto en el servidor compartido (`127.0.0.1:4096`, ajustable con `opencodeServer: { host, port }`); `false` lo apaga. |
+| `codexDiscovery` | Descubre las corridas de Codex (carpeta `codex.sessionsDir`) lanzadas en el repo o en sus worktrees; `false` lo apaga. |
+| `ui.showUsage` / `ui.showPc` | Muestran los medidores de consumo y la carga del PC; ocultos por defecto porque el consumo se ve dentro de Claude Code. |
 | `pollSeconds` / `*CacheSeconds` | Cadencia de la página y cachés del servidor. |
 
 Con `cleanup.hideFinishedAfterMinutes` en un valor mayor que 0 (`5` por defecto),

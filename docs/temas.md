@@ -59,3 +59,22 @@ Pensado para temas como la lluvia de código de Matrix o las interfaces holográ
 - Colores: los de hoy (`--bg #000`, `--live #00ff41`, `--text #35e05f`, `--dim #00a333`, etc.).
 - Tipografía actual: **Share Tech Mono** (títulos) y **Cascadia Mono / Consolas** (texto). No es la tipografía de la película: el logo de *The Matrix* es letra dibujada a medida sobre Times, y los caracteres de la lluvia son un juego propio de Simon Whiteley (katakana espejados, letras y números) que nunca se publicó oficialmente. Existen recreaciones hechas por fans; antes de incluir alguna hay que revisar su licencia.
 - Fondo animado: candidato natural, la lluvia de código.
+
+## Temas disponibles (2026-10-09)
+
+Cada tema elige también el estilo de las ramas del árbol de git con `--rail-style` y su fuente con `--rail-font`.
+
+| Tema | Ramas del árbol | Fondo animado |
+|---|---|---|
+| `matrix` | `binary`: dígitos 0/1 que suben por cada rama | lluvia de código |
+| `claude-desktop` | `line`: líneas suaves, nodos redondos | mascota pixel-art que reacciona a lo que hacen los agentes (escribe, construye, lee) |
+| `bash` | `ascii`: `*`, `|`, `/`, `\\` como `git log --graph`, cursor parpadeante en el commit nuevo | ninguno |
+| `naruto` | `line` | atardecer difuminado con hojas verdes; si existe `monitor/public/img/naruto-wallpaper.(webp\|jpg\|png)` (imagen personal, ignorada por git) la reconstruye para cualquier forma de pantalla |
+| `vscode` | `ring`: línea gruesa con nodos en anillo | editor fantasma que escribe código con varios cursores, Error Lens y minimapa |
+| `jarvis` | `ring` con brillo | HUD holográfico: reactor de anillos, radar, rejilla hexagonal, lecturas numéricas |
+
+Reglas aprendidas al construirlos:
+- Todo bloque de tema define la **unión** de los tokens `--scene-*` de todos los temas (un test lo exige).
+- Los paneles (`--panel`, `--card`) deben ser **traslúcidos** (alfa 0,5 a 0,65) y `--rain-opacity` alto; con paneles sólidos el fondo queda tapado.
+- El fondo recibe `update(feed)` con `{ working, total, engines, kinds, errors }`; sirve para reaccionar a la actividad.
+- La paleta de `vscode` es una aproximación (One Dark Pro) y no está verificada contra la configuración real de ningún desarrollador.
