@@ -80,6 +80,8 @@
     --rain-glyph: rgba(var(--live-rgb), 0.85);
     --rain-trail: rgba(0, 0, 0, 0.08);
     --rain-font: 15px 'MS Gothic', 'Yu Gothic', monospace;
+    --rail-style: binary;
+    --rail-font: 700 12px Consolas, monospace;
     --branch-0: #00ff41;
     --branch-1: #ffb000;
     --branch-2: #55aaff;
@@ -204,6 +206,8 @@
     --rain-glyph: rgba(var(--live-rgb), 0.85);
     --rain-trail: rgba(0, 0, 0, 0.08);
     --rain-font: 15px 'MS Gothic', 'Yu Gothic', monospace;
+    --rail-style: binary;
+    --rail-font: 700 12px Consolas, monospace;
     --branch-0: #00ff41;
     --branch-1: #ffb000;
     --branch-2: #55aaff;
@@ -328,6 +332,8 @@
     --rain-glyph: currentColor;
     --rain-trail: transparent;
     --rain-font: 15px monospace;
+    --rail-style: line;
+    --rail-font: 600 13px ui-sans-serif, system-ui, sans-serif;
     --branch-0: #d97757;
     --branch-1: #f0c674;
     --branch-2: #8bb8d8;
@@ -452,6 +458,8 @@
     --rain-glyph: currentColor;
     --rain-trail: transparent;
     --rain-font: 15px monospace;
+    --rail-style: ascii;
+    --rail-font: 700 14px "Cascadia Mono", Consolas, "Courier New", monospace;
     --branch-0: #8ae234;
     --branch-1: #fce94f;
     --branch-2: #729fcf;
@@ -1490,6 +1498,9 @@
         rainGlyph: token("--rain-glyph", "currentColor"),
         rainTrail: token("--rain-trail", "transparent"),
         rainFont: token("--rain-font", "15px monospace"),
+        railStyle: token("--rail-style", "binary"),
+        railFont: token("--rail-font", "700 14px monospace"),
+        railBg: token("--card", "transparent"),
         branchNeutral: token("--branch-neutral", "currentColor")
       };
     }
@@ -1505,6 +1516,7 @@
   // in localStorage; an unknown id always falls back to Matrix. Switching
   // theme stops the previous background and starts the new theme's module.
   function applyTheme(id) {
+    if (typeof gitRails !== "undefined" && gitRails) gitRails.colors = {};
     var theme = themeById(id) || themeById(DEFAULT_THEME);
     currentTheme = theme.id;
     document.documentElement.setAttribute("data-theme", currentTheme);
@@ -2011,6 +2023,7 @@
       color: laneIsMain(commit, commit.lane) ? MAIN_COLOR : laneColor(commit, commit.lane),
       main: laneIsMain(commit, commit.lane),
       born: isNew ? performance.now() : 0,
+      merge: (commit.parents || []).length > 1,
       commit: commit
     });
   }
@@ -2079,6 +2092,90 @@
     ctx.fillStyle = lit > 0.95 ? token("--git-glint", "currentColor") : color;
     ctx.fillText(glyphAt(x, y, lit > 0.7 ? Math.floor(ms / 300) : 0), x, y + 3.5);
   }
+  // The look of the rails belongs to the theme (--rail-style): "binary" (Matrix)
+  // runs 0/1 glyphs, "line" is a clean smooth line, "ring" a thick line with ring
+  // nodes, "ascii" draws the graph with | / \ and * like git log --graph.
+  function railWave(x, y, time) {
+    var wave = Math.sin(6.2832 * (y / 130 + time * WAVE_SPEED + x * 0.017));
+    return wave > 0 ? wave * wave * wave : 0;
+  }
+  function drawStyledSeg(ctx, rails, seg, color, style, time, taken) {
+    ctx.shadowBlur = Number(token("--git-shadow-reset", "0"));
+    if (style === "ascii") {
+      ctx.font = tokens().railFont;
+      ctx.fillStyle = color;
+      if (seg.kind === "line") {
+        var minY = Math.min(seg.y1, seg.y2);
+        var maxY = Math.max(seg.y1, seg.y2);
+        var first = Math.ceil((minY - PAD_Y) / ROW_H) * ROW_H + PAD_Y;
+        for (var y = first; y <= maxY; y += ROW_H) {
+          if (taken[Math.round(seg.x1) + ":" + Math.round(y)]) continue;
+          ctx.globalAlpha = (seg.main ? 0.75 : 0.55) + 0.25 * railWave(seg.x1, y, time);
+          ctx.fillText("|", seg.x1, y + 5);
+        }
+      } else {
+        ctx.globalAlpha = seg.main ? 0.9 : 0.7;
+        ctx.fillText(seg.x2 < seg.x1 ? "/" : "\\", (seg.x1 + seg.x2) / 2, (seg.y1 + seg.y2) / 2 + 5);
+      }
+      return;
+    }
+    ctx.beginPath();
+    ctx.moveTo(seg.x1, seg.y1);
+    if (seg.kind === "curve") ctx.bezierCurveTo(seg.x1, seg.y1 + 8, seg.x2, seg.y2 - 8, seg.x2, seg.y2);
+    else ctx.lineTo(seg.x2, seg.y2);
+    ctx.lineCap = "round";
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = seg.main ? 1 : 0.85;
+    ctx.lineWidth = (seg.main ? 3 : 2) * (style === "ring" ? 1.25 : 1);
+    ctx.stroke();
+  }
+  function drawStyledNode(ctx, rails, node, color, style) {
+    ctx.shadowBlur = Number(token("--git-shadow-reset", "0"));
+    ctx.globalAlpha = 1;
+    var fresh = node.born && performance.now() - node.born < 4200;
+    if (style === "ascii") {
+      ctx.font = tokens().railFont;
+      ctx.fillStyle = color;
+      // A new commit blinks like a terminal cursor for a few seconds.
+      var glyph = fresh && Math.floor(performance.now() / 500) % 2 === 0 ? "\u2588" : node.merge ? "M" : "*";
+      ctx.fillText(glyph, node.x, node.y + 5);
+      return;
+    }
+    var radius = (node.main ? 5.5 : 4.5) + (style === "ring" ? 0.5 : 0);
+    ctx.beginPath();
+    ctx.arc(node.x, node.y, radius, 0, 6.2832);
+    if (style === "ring") {
+      ctx.fillStyle = tokens().railBg;
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      if (!node.merge) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, 2, 0, 6.2832);
+        ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = tokens().railBg;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
+    if (node.born) {
+      var age = (performance.now() - node.born) / 1400;
+      if (age < 3) {
+        var phase = age % 1;
+        ctx.globalAlpha = Number(token("--git-node-flash-opacity", "0")) * (1 - phase);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, 6 + phase * 12, 0, 6.2832);
+        ctx.stroke();
+      }
+    }
+  }
   function gitFrame(ms) {
     window.requestAnimationFrame(gitFrame);
 
@@ -2093,11 +2190,22 @@
     ctx.setTransform(rails.dpr, 0, 0, rails.dpr, 0, 0);
     ctx.clearRect(0, 0, rails.width, rails.height);
     ctx.textAlign = "center";
+    var style = tokens().railStyle;
+    var taken = {};
+    if (style === "ascii") {
+      rails.nodes.forEach(function (node) {
+        taken[Math.round(node.x) + ":" + Math.round(node.y)] = true;
+      });
+    }
     rails.segs.forEach(function (seg) {
       var minY = Math.min(seg.y1, seg.y2);
       var maxY = Math.max(seg.y1, seg.y2);
       if (maxY < top || minY > bottom) return;
       var color = railColor(rails, seg.color);
+      if (style === "ascii" || style === "line" || style === "ring") {
+        drawStyledSeg(ctx, rails, seg, color, style, time, taken);
+        return;
+      }
       ctx.beginPath();
       ctx.moveTo(seg.x1, seg.y1);
       if (seg.kind === "curve") ctx.bezierCurveTo(seg.x1, seg.y1 + 8, seg.x2, seg.y2 - 8, seg.x2, seg.y2);
@@ -2137,6 +2245,10 @@
         ctx.beginPath();
         ctx.arc(node.x, node.y, 9, 0, 6.2832);
         ctx.stroke();
+      }
+      if (style === "ascii" || style === "line" || style === "ring") {
+        drawStyledNode(ctx, rails, node, color, style);
+        return;
       }
       ctx.shadowColor = color;
       ctx.shadowBlur = Number(token(node.main ? "--git-shadow-node-main" : "--git-shadow-node-branch", "0"));

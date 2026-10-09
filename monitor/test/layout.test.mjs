@@ -543,3 +543,16 @@ test("the git graph stays visible in card mode and commit nodes open a hover bub
   assert.match(html, /\.git-tip\.is-open/);
   assert.match(html, /function fillGitTip\(tip, commit\)/);
 });
+
+test("each theme picks the look of the git rails through --rail-style", () => {
+  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii" };
+  for (const [id, style] of Object.entries(styles)) {
+    const block = html.slice(html.indexOf(`:root[data-theme="${id}"]`));
+    const own = block.slice(0, block.indexOf("\n  }"));
+    assert.match(own, new RegExp(`--rail-style:\\s*${style};`), id + " rail style");
+    assert.match(own, /--rail-font:/, id + " rail font");
+  }
+  assert.match(html, /function drawStyledSeg\(/);
+  assert.match(html, /function drawStyledNode\(/);
+  assert.match(html, /railStyle: token\("--rail-style", "binary"\)/);
+});
