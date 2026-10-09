@@ -542,6 +542,16 @@
     --git-shadow-reset: 0;
     --git-node-flash-opacity: 0;
   }
+
+  /* theme-slot:naruto-css */
+
+  /* ---- */
+
+  /* theme-slot:vscode-css */
+
+  /* ---- */
+
+  /* theme-slot:jarvis-css */
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
   body {
@@ -1430,8 +1440,25 @@
   var THEMES = [
     { id: "matrix", name: "Matrix", background: "matrix-rain" },
     { id: "claude-desktop", name: "Claude Desktop", background: null },
-    { id: "bash", name: "Terminal Bash", background: null }
+    { id: "bash", name: "Terminal Bash", background: null },
+    // theme-slot:naruto
+    // ----
+    // theme-slot:vscode
+    // ----
+    // theme-slot:jarvis
   ];
+  // Animated background modules that live in their own file (public/js): each
+  // exports default { start(canvas, tokens), stop(), resize(), update(feed) }.
+  // The key is the theme's "background" name, the value the module URL.
+  var BACKGROUND_FILES = {
+    // theme-slot:claude
+    // ----
+    // theme-slot:naruto
+    // ----
+    // theme-slot:vscode
+    // ----
+    // theme-slot:jarvis
+  };
   var snapshot = null;
   var knownShas = new Set();
   var firstRender = true;
@@ -1546,10 +1573,52 @@
   function startBackground() {
     stopBackground();
     var theme = themeById(currentTheme);
-    var module = theme && theme.background ? BACKGROUNDS[theme.background] : null;
-    if (!backgroundEnabled || !module) return;
-    module.start(document.getElementById("rain"), tokens());
-    activeBackground = module;
+    if (!backgroundEnabled || !theme || !theme.background) return;
+    var name = theme.background;
+    var module = BACKGROUNDS[name];
+    if (module) {
+      module.start(document.getElementById("rain"), tokens());
+      activeBackground = module;
+      return;
+    }
+    var url = BACKGROUND_FILES[name];
+    if (!url) return;
+    // Modules in their own file load on demand; the answer is ignored when the
+    // theme or the toggle changed while the file was loading.
+    import(url).then(function (loaded) {
+      var current = themeById(currentTheme);
+      if (!backgroundEnabled || !current || current.background !== name || activeBackground) return;
+      var own = loaded && loaded.default;
+      if (!own || typeof own.start !== "function") return;
+      own.start(document.getElementById("rain"), tokens());
+      activeBackground = own;
+      if (snapshot) feedBackground(snapshot);
+    }).catch(function () {
+      // A missing module just leaves the page without animated background.
+    });
+  }
+  // What the agents are doing, offered to the background so a theme can react
+  // to it (for example a mascot that builds with the tool the agents use).
+  function backgroundFeed(next) {
+    var feed = { working: 0, total: 0, engines: {}, kinds: {}, errors: 0 };
+    (next.workers || []).forEach(function (worker) {
+      feed.total += 1;
+      var working = (worker.stateKind || worker.state) === "working";
+      if (!working) return;
+      feed.working += 1;
+      feed.engines[worker.engine] = (feed.engines[worker.engine] || 0) + 1;
+      var events = (worker.activity && worker.activity.events) || [];
+      events.slice(-4).forEach(function (event) {
+        feed.kinds[event.kind] = (feed.kinds[event.kind] || 0) + 1;
+        if (event.kind === "ERR") feed.errors += 1;
+      });
+    });
+    return feed;
+  }
+  function feedBackground(next) {
+    if (activeBackground && typeof activeBackground.update === "function") {
+      activeBackground.update(backgroundFeed(next));
+    }
   }
   function renderBackgroundToggle() {
     var button = document.getElementById("bg-toggle");
@@ -2467,6 +2536,7 @@
     var orchestrator = next.orchestrator || {};
     document.getElementById("orch-model").textContent = orchestrator.text || "";
     document.getElementById("orch").title = [orchestrator.label, orchestrator.engine].filter(Boolean).join(" · ");
+    feedBackground(next);
     var ui = next.ui || {};
     document.getElementById("usage").hidden = ui.showUsage !== true;
     document.getElementById("pc").hidden = ui.showPc !== true;

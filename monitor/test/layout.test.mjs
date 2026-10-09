@@ -370,7 +370,7 @@ test("calm themes disable every glow, decorative animation, and canvas shadow th
 
 test("theme changes stop Matrix rain and update the background control without changing its preference", () => {
   assert.match(html, /function applyTheme\(id\)[\s\S]*?startBackground\(\);/);
-  assert.match(html, /function startBackground\(\)[\s\S]*?stopBackground\(\);[\s\S]*?var module = theme && theme\.background \? BACKGROUNDS\[theme\.background\] : null;[\s\S]*?if \(!backgroundEnabled \|\| !module\) return;/);
+  assert.match(html, /function startBackground\(\)[\s\S]*?stopBackground\(\);[\s\S]*?if \(!backgroundEnabled \|\| !theme \|\| !theme\.background\) return;[\s\S]*?var module = BACKGROUNDS\[name\];/);
   assert.match(html, /var backgroundEnabled = storedItem\(BACKGROUND_STORAGE_KEY\) !== "0";/);
   assert.match(html, /button\.hidden = !available;\s*button\.disabled = !available;/);
   assert.doesNotMatch(html.match(/function renderBackgroundToggle\(\) \{([\s\S]*?)\n  \}/)[1], /rememberItem|localStorage/);
@@ -555,4 +555,14 @@ test("each theme picks the look of the git rails through --rail-style", () => {
   assert.match(html, /function drawStyledSeg\(/);
   assert.match(html, /function drawStyledNode\(/);
   assert.match(html, /railStyle: token\("--rail-style", "binary"\)/);
+});
+
+test("backgrounds in their own file load on demand and receive the agents feed", () => {
+  assert.match(html, /var BACKGROUND_FILES = \{/);
+  assert.match(html, /import\(url\)\.then\(function \(loaded\)/);
+  assert.match(html, /function backgroundFeed\(next\)/);
+  assert.match(html, /activeBackground\.update\(backgroundFeed\(next\)\)/);
+  assert.match(html, /theme-slot:naruto/);
+  assert.match(html, /theme-slot:vscode-css/);
+  assert.match(html, /theme-slot:jarvis/);
 });
