@@ -12,7 +12,7 @@ const SCENE_TOKENS = [
 ];
 
 const FRAME_INTERVAL = 40;
-const LEAF_COUNT = 7;
+const LEAF_COUNT = 16;
 
 let canvas = null;
 let context = null;
@@ -175,11 +175,13 @@ function drawLeaves(width, height, time) {
   for (let index = 0; index < LEAF_COUNT; index += 1) {
     const progress = ((time * (0.000018 + index * 0.000002) + index / LEAF_COUNT) % 1);
     const x = (progress * 1.15 - 0.08) * width;
-    const y = height * (0.22 + (index % 4) * 0.09) + Math.sin(time / 1500 + index) * 14;
-    const size = Math.max(3, Math.min(width, height) * (0.009 + (index % 3) * 0.002));
+    // Leaves drift across and slowly fall, each at its own height and tumble.
+    const y = height * (0.12 + (index % 6) * 0.12) + progress * height * 0.16 + Math.sin(time / 1500 + index) * 16;
+    const size = Math.max(7, Math.min(width, height) * (0.016 + (index % 3) * 0.004));
     context.save();
     context.translate(x, y);
-    context.rotate(Math.sin(time / 1200 + index) * 0.7);
+    context.rotate(time / (2600 + index * 170) + index + Math.sin(time / 900 + index) * 0.6);
+    context.scale(1, 0.55 + 0.45 * Math.abs(Math.cos(time / (1900 + index * 120) + index)));
     context.fillStyle = color("--scene-leaf");
     context.beginPath();
     context.moveTo(0, -size);
@@ -187,6 +189,14 @@ function drawLeaves(width, height, time) {
     context.quadraticCurveTo(-size * 1.1, size * 0.15, 0, -size);
     context.closePath();
     context.fill();
+    // The midrib, a slightly darker stroke, makes the shape read as a leaf.
+    context.strokeStyle = color("--scene-hill-front");
+    context.globalAlpha = 0.5;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(0, -size * 0.9);
+    context.lineTo(0, size * 0.9);
+    context.stroke();
     context.restore();
   }
 }

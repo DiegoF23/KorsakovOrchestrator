@@ -30,7 +30,7 @@ function setup({ reducedMotion = false, hidden = false } = {}) {
     beginPath() {}, moveTo() {}, lineTo() {}, quadraticCurveTo() {}, closePath() {}, fill() { calls.fills.push(this.fillStyle); calls.paintFilters.push(this.filter); },
     stroke() { calls.fills.push(this.strokeStyle); },
     save() { states.push({ filter: this.filter, fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, globalAlpha: this.globalAlpha }); },
-    restore() { Object.assign(this, states.pop()); }, translate() {}, rotate() {}
+    restore() { Object.assign(this, states.pop()); }, translate() {}, rotate() {}, scale() {}
   };
   const canvas = { width: 0, height: 0, getContext: () => context };
   const add = (surface, name, callback) => listeners[surface].set(name, callback);
