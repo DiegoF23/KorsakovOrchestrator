@@ -35,7 +35,11 @@ const STATIC_TYPES = {
   ".woff2": "font/woff2",
   ".txt": "text/plain; charset=utf-8",
   ".mjs": "text/javascript; charset=utf-8",
-  ".js": "text/javascript; charset=utf-8"
+  ".js": "text/javascript; charset=utf-8",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp"
 };
 
 export function isLoopback(host) {
@@ -80,6 +84,8 @@ export function routeRequest(method, pathname) {
   if (pathname === "/api/tree") return "tree";
   if (pathname.startsWith("/fonts/")) return "font";
   if (pathname.startsWith("/js/")) return "script";
+  // Personal background images (monitor/public/img, git-ignored).
+  if (pathname.startsWith("/img/")) return "image";
   return null;
 }
 
@@ -365,7 +371,7 @@ export function createRequestHandler(config, options = {}) {
       return;
     }
 
-    if (route === "font" || route === "script") {
+    if (route === "font" || route === "script" || route === "image") {
       const file = resolveStaticFile(path.join(serverDir, "public"), pathname);
       const type = file ? STATIC_TYPES[path.extname(file).toLowerCase()] : null;
       if (!file || !type) {

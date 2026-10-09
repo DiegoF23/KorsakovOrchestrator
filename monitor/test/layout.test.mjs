@@ -266,11 +266,12 @@ test("every registered theme has the same complete token keyset and early first-
   const themes = Array.from(registry[1].matchAll(/id: "([^"]+)", name: "([^"]+)", background: ("[^"]+"|null)/g), (match) => ({ id: match[1], name: match[2], background: match[3] }));
   assert.deepEqual(themes, [
     { id: "matrix", name: "Matrix", background: '"matrix-rain"' },
-    { id: "claude-desktop", name: "Claude Desktop", background: "null" },
+    { id: "claude-desktop", name: "Claude Desktop", background: '"claude-mascot"' },
     { id: "bash", name: "Terminal Bash", background: "null" },
+    { id: "naruto", name: "Naruto", background: '"naruto-dusk"' },
     { id: "jarvis", name: "JARVIS", background: '"jarvis-hud"' }
   ]);
-  assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"', '"jarvis"']);
+  assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"', '"naruto"', '"jarvis"']);
   const expected = byTheme.get("matrix");
   for (const theme of themes) {
     assert.ok(byTheme.has(theme.id), `${theme.id} has a CSS token block`);
@@ -307,9 +308,13 @@ function compositeColor(foreground, background) {
 
 test("new themes keep normal UI, state labels, and code text at 4.5:1 on rendered surfaces", () => {
   const blocks = themeTokenBlocks();
-  for (const id of ["claude-desktop", "bash"]) {
+  for (const id of ["claude-desktop", "bash", "naruto"]) {
     const block = blocks.find((item) => item.includes(`[data-theme="${id}"]`));
     const values = tokenValues(block);
+    // Translucent surfaces are judged as rendered: composited over the page.
+    for (const surface of ["--card", "--panel"]) {
+      values.set(surface, compositeColor(values.get(surface), values.get("--bg")));
+    }
     for (const [foreground, background] of [
       ["--text", "--card"], ["--dim", "--card"], ["--live-text", "--card"],
       ["--warn", "--card"], ["--err", "--card"], ["--work", "--card"],
@@ -446,7 +451,7 @@ test("Terminal Bash uses the exact Ubuntu Tango ANSI 16 palette", () => {
 });
 
 test("the header offers the theme picker and the background switch, remembered in storage", () => {
-  assert.match(html, /var THEMES = \[[\s\S]*?id: "matrix", name: "Matrix", background: "matrix-rain"[\s\S]*?id: "claude-desktop", name: "Claude Desktop", background: null[\s\S]*?id: "bash", name: "Terminal Bash", background: null/);
+  assert.match(html, /var THEMES = \[[\s\S]*?id: "matrix", name: "Matrix", background: "matrix-rain"[\s\S]*?id: "claude-desktop", name: "Claude Desktop", background: "claude-mascot"[\s\S]*?id: "bash", name: "Terminal Bash", background: null[\s\S]*?id: "naruto", name: "Naruto", background: "naruto-dusk"/);
   assert.match(html, /<select id="theme-select"/);
   assert.match(html, /for="theme-select"/);
   assert.match(html, /<button type="button" class="bg-toggle" id="bg-toggle" aria-pressed="true">FONDO ON<\/button>/);
@@ -546,7 +551,7 @@ test("the git graph stays visible in card mode and commit nodes open a hover bub
 });
 
 test("each theme picks the look of the git rails through --rail-style", () => {
-  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii" };
+  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii", naruto: "line" };
   for (const [id, style] of Object.entries(styles)) {
     const block = html.slice(html.indexOf(`:root[data-theme="${id}"]`));
     const own = block.slice(0, block.indexOf("\n  }"));
