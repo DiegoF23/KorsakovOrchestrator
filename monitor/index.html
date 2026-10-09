@@ -10,7 +10,7 @@
   // already themed. Unknown or missing ids fall back to Matrix; every storage
   // access is wrapped because the page must work without localStorage.
   (function () {
-    var ids = ["matrix", "claude-desktop", "bash"];
+    var ids = ["matrix", "claude-desktop", "bash", "jarvis"];
     var id = null;
     try {
       id = window.localStorage.getItem("fleet-monitor.theme");
@@ -163,6 +163,12 @@
     --git-node-flash-opacity: 0.6;
     --git-font: 9px Consolas, monospace;
     --git-main-font: bold 11px Consolas, monospace;
+    --scene-primary: #00ff41;
+    --scene-secondary: #5fe8e8;
+    --scene-accent: #ffb000;
+    --scene-alert: #ff5555;
+    --scene-grid: #00a333;
+    --scene-glint: #d8ffe6;
   }
   :root[data-theme="matrix"] {
     --bg: #000;
@@ -289,6 +295,12 @@
     --git-node-flash-opacity: 0.6;
     --git-font: 9px Consolas, monospace;
     --git-main-font: bold 11px Consolas, monospace;
+    --scene-primary: #00ff41;
+    --scene-secondary: #5fe8e8;
+    --scene-accent: #ffb000;
+    --scene-alert: #ff5555;
+    --scene-grid: #00a333;
+    --scene-glint: #d8ffe6;
   }
   :root[data-theme="claude-desktop"] {
     --bg: #262624;
@@ -415,6 +427,12 @@
     --git-shadow-node-branch: 0;
     --git-shadow-reset: 0;
     --git-node-flash-opacity: 0;
+    --scene-primary: #d97757;
+    --scene-secondary: #e18463;
+    --scene-accent: #f0c674;
+    --scene-alert: #f28b82;
+    --scene-grid: #c2c0b6;
+    --scene-glint: #faf9f5;
   }
   :root[data-theme="bash"] {
     --bg: #000000;
@@ -541,6 +559,12 @@
     --git-shadow-node-branch: 0;
     --git-shadow-reset: 0;
     --git-node-flash-opacity: 0;
+    --scene-primary: #8ae234;
+    --scene-secondary: #34e2e2;
+    --scene-accent: #fce94f;
+    --scene-alert: #ef2929;
+    --scene-grid: #8a8a8a;
+    --scene-glint: #eeeeec;
   }
 
   /* theme-slot:naruto-css */
@@ -551,7 +575,140 @@
 
   /* ---- */
 
-  /* theme-slot:jarvis-css */
+  /* theme-slot:jarvis-css: JARVIS holographic HUD (Iron Man 2). Electric cyan
+     is the main accent, arc-reactor orange the secondary one. */
+  :root[data-theme="jarvis"] {
+    --bg: #02070d;
+    --card: rgba(4, 13, 22, 0.56);
+    --panel: rgba(4, 13, 22, 0.5);
+    --rain-opacity: 0.95;
+    --live: #37d6ff;
+    --live-text: #9be8ff;
+    --live-rgb: 55, 214, 255;
+    --text: #d2efff;
+    --dim: #7fb0c8;
+    --dim-rgb: 127, 176, 200;
+    --warn: #ffb347;
+    --warn-rgb: 255, 179, 71;
+    --err: #ff5a64;
+    --err-rgb: 255, 90, 100;
+    --work: #ff8a1f;
+    --work-rgb: 255, 138, 31;
+    --wait: #8aa6ff;
+    --wait-rgb: 138, 166, 255;
+    --stale: #8098b4;
+    --stale-rgb: 128, 152, 180;
+    --border: rgba(var(--live-rgb), 0.26);
+    --on-warn: #000;
+    --on-crit: #000;
+    --mask-fill: #fff;
+    --scanline: rgba(var(--live-rgb), 0.03);
+    --scrollbar: rgba(var(--live-rgb), 0.35);
+    --scrollbar-thumb: rgba(var(--live-rgb), 0.45);
+    --tron-head-rgb: 230, 250, 255;
+    --glow-title: drop-shadow(0 0 5px rgba(var(--live-rgb), 0.5));
+    --glow-live: 0 0 5px rgba(var(--live-rgb), 0.4);
+    --glow-work: 0 0 6px rgba(var(--work-rgb), 0.45);
+    --glow-done: 0 0 6px rgba(var(--live-rgb), 0.4);
+    --glow-error: 0 0 6px rgba(var(--err-rgb), 0.4);
+    --glow-waiting: 0 0 6px rgba(var(--wait-rgb), 0.35);
+    --glow-stale: 0 0 5px rgba(var(--stale-rgb), 0.3);
+    --glow-commit: 0 0 5px rgba(var(--live-rgb), 0.35);
+    --glow-done-static: 0 0 8px rgba(var(--live-rgb), 0.4), inset 0 0 6px rgba(var(--live-rgb), 0.18);
+    --glow-error-static: 0 0 8px rgba(var(--err-rgb), 0.4), inset 0 0 6px rgba(var(--err-rgb), 0.18);
+    --rain-glyph: rgba(var(--live-rgb), 0.6);
+    --rain-trail: rgba(2, 7, 13, 0.1);
+    --rain-font: 11px "Cascadia Mono", Consolas, monospace;
+    --rail-style: ring;
+    --rail-font: 600 12px "Segoe UI", "Bahnschrift", system-ui, sans-serif;
+    --branch-0: #37d6ff;
+    --branch-1: #ff8a1f;
+    --branch-2: #2ee6c5;
+    --branch-3: #ffc34d;
+    --branch-4: #4f8dff;
+    --branch-5: #9be8ff;
+    --branch-6: #ffb347;
+    --branch-7: #1fb5c9;
+    --branch-neutral: #4f7488;
+    --code-bg: rgba(2, 9, 16, 0.86);
+    --code-text: #d6f3ff;
+    --code-keyword: #37d6ff;
+    --code-string: #ffb347;
+    --code-comment: #7397aa;
+    --code-number: #9be8ff;
+    --code-function: #2ee6c5;
+    --git-fallback: #37d6ff;
+    --git-glint: #e6faff;
+    --code-added-bg: rgba(var(--live-rgb), 0.14);
+    --code-removed-bg: rgba(var(--err-rgb), 0.14);
+    --ansi-0: #051019;
+    --ansi-1: #ff5a64;
+    --ansi-2: #2ee6c5;
+    --ansi-3: #ffb347;
+    --ansi-4: #4f8dff;
+    --ansi-5: #b48cff;
+    --ansi-6: #37d6ff;
+    --ansi-7: #d2efff;
+    --ansi-8: #3d5a6c;
+    --ansi-9: #ff7a86;
+    --ansi-10: #6ff5dc;
+    --ansi-11: #ffd08a;
+    --ansi-12: #85b0ff;
+    --ansi-13: #d0b5ff;
+    --ansi-14: #9be8ff;
+    --ansi-15: #f0fbff;
+    --font: "Cascadia Mono", Consolas, monospace;
+    --font-display: "Segoe UI", "Bahnschrift", system-ui, sans-serif;
+    --font-title: "Segoe UI", "Bahnschrift", system-ui, sans-serif;
+    --title-color: var(--live-text);
+    --title-image: none;
+    --radius-1: 1px;
+    --radius-2: 2px;
+    --radius-3: 2px;
+    --radius-4: 3px;
+    --radius-5: 3px;
+    --scanline-effect: repeating-linear-gradient(0deg, var(--scanline) 0 1px, transparent 1px 4px);
+    --tron-display: block;
+    --font-ui: "Segoe UI", "Bahnschrift", system-ui, sans-serif;
+    --glow-tooltip: 0 0 12px rgba(var(--live-rgb), 0.22);
+    --glow-tab-active: 0 0 4px rgba(var(--live-rgb), 0.3);
+    --glow-card-in-start-filter: brightness(1.8);
+    --glow-card-in-flash-shadow: 0 0 16px rgba(var(--live-rgb), 0.5);
+    --glow-card-in-flash-filter: brightness(1.35);
+    --glow-card-out-flash-filter: brightness(1.5);
+    --glow-card-out-flash-shadow: 0 0 14px rgba(var(--work-rgb), 0.45);
+    --glow-card-out-end-filter: blur(2px);
+    --glow-node-flash-start-filter: drop-shadow(0 0 0 rgba(var(--live-rgb), 0));
+    --glow-node-flash-mid-filter: drop-shadow(0 0 6px rgba(var(--live-rgb), 0.85));
+    --glow-node-flash-end-filter: drop-shadow(0 0 0 rgba(var(--live-rgb), 0));
+    --animation-critical-blink: crit-blink 1.2s steps(2, jump-none) infinite;
+    --animation-tron-border: tron-border 4.2s linear infinite;
+    --animation-progress-pulse: progress-pulse 1.6s ease-in-out infinite;
+    --animation-card-in: card-in 560ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+    --animation-card-out: card-out 480ms ease-in both;
+    --animation-commit-in: commit-in 260ms ease-out both;
+    --animation-node-flash: node-flash 900ms ease-out both;
+    --animation-terminal-cursor: term-blink 1s steps(2, jump-none) infinite;
+    --animation-memory-pulse: mem-pulse 1.2s ease-in-out infinite;
+    --animation-think-pulse: think-pulse 1.8s linear infinite;
+    --animation-live-typing: live-typing 1s steps(2, jump-none) infinite;
+    --animation-live-scan: live-scan 1.6s linear infinite;
+    --transition-git-tip: opacity 120ms ease-out, transform 120ms ease-out;
+    --git-shadow-main: 5;
+    --git-shadow-branch: 3;
+    --git-shadow-node-main: 4;
+    --git-shadow-node-branch: 2;
+    --git-shadow-reset: 0;
+    --git-node-flash-opacity: 0.6;
+    --git-font: 9px "Cascadia Mono", Consolas, monospace;
+    --git-main-font: bold 11px "Cascadia Mono", Consolas, monospace;
+    --scene-primary: #37d6ff;
+    --scene-secondary: #9be8ff;
+    --scene-accent: #ffb347;
+    --scene-alert: #ff8a1f;
+    --scene-grid: #1d6f8c;
+    --scene-glint: #e6faff;
+  }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
   body {
@@ -1448,7 +1605,7 @@
     // ----
     // theme-slot:vscode
     // ----
-    // theme-slot:jarvis
+    { id: "jarvis", name: "JARVIS", background: "jarvis-hud" }, // theme-slot:jarvis
   ];
   // Animated background modules that live in their own file (public/js): each
   // exports default { start(canvas, tokens), stop(), resize(), update(feed) }.
@@ -1460,7 +1617,7 @@
     // ----
     // theme-slot:vscode
     // ----
-    // theme-slot:jarvis
+    "jarvis-hud": "/js/bg-jarvis-hud.mjs", // theme-slot:jarvis
   };
   var snapshot = null;
   var knownShas = new Set();
