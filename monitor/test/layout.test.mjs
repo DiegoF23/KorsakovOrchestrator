@@ -170,49 +170,13 @@ test("the card shows the todo progress as a segmented bar with pace and idle chi
   assert.doesNotMatch(html, /innerHTML/);
 });
 
-function loadGitCardMode() {
-  const block = html.match(/<script id="git-layout-logic">([\s\S]*?)<\/script>/);
-  assert.ok(block, "the pure git layout logic lives in its own script block");
-  return new Function(block[1] + "\nreturn gitCardMode;")();
-}
-
-test("the card-mode decision thresholds at one worker card or 22vh", () => {
-  const gitCardMode = loadGitCardMode();
-  assert.equal(gitCardMode(300, 1000, "panel"), "panel");
-  assert.equal(gitCardMode(219, 1000, "panel"), "card");
-  assert.equal(gitCardMode(139, 500, "panel"), "card");
-  assert.equal(gitCardMode(140, 500, "panel"), "panel");
-});
-
-test("the card-mode decision has hysteresis and no flicker band", () => {
-  const gitCardMode = loadGitCardMode();
-  assert.equal(gitCardMode(220, 1000, "panel"), "panel");
-  assert.equal(gitCardMode(220, 1000, "card"), "card");
-  assert.equal(gitCardMode(243, 1000, "card"), "card");
-  assert.equal(gitCardMode(244, 1000, "card"), "panel");
-  for (let available = 0; available <= 600; available += 1) {
-    const fromPanel = gitCardMode(available, 1000, "panel");
-    assert.equal(gitCardMode(available, 1000, fromPanel), fromPanel, "stable from panel at " + available);
-    const fromCard = gitCardMode(available, 1000, "card");
-    assert.equal(gitCardMode(available, 1000, fromCard), fromCard, "stable from card at " + available);
-  }
-});
-
-test("the git tree becomes the first worker card when space gets tight", () => {
-  assert.match(html, /<script id="git-layout-logic">/);
-  assert.match(html, /function gitCardMode\(available, viewportHeight, previous\)/);
-  assert.match(html, /Math\.max\(GIT_PANEL_MIN_PX, viewportHeight \* GIT_CARD_MIN_VH\)/);
-  assert.match(html, /\.workers > \.git\s*\{[^}]*contain:\s*size/);
-  assert.match(html, /\.workers > \.git\s*\{[^}]*border:\s*1px solid var\(--border\)/);
-  assert.match(html, /\.workers > \.git #git-lines\s*\{[^}]*display:\s*none/);
-  assert.match(html, /\.workers > \.git \.commit \.chip\s*\{[^}]*display:\s*none/);
-  assert.match(html, /\.git\.is-measuring\s*\{[^}]*position:\s*absolute/);
-  assert.match(html, /gitCardMode\(measurePanelSpace\(\), window\.innerHeight, gitMode\)/);
-  assert.match(html, /git\.classList\.add\("is-measuring"\)/);
-  assert.match(html, /workers\.insertBefore\(git, workers\.firstChild\)/);
+test("the git tree fills the free slots of the last row, else sits full-width below", () => {
+  assert.doesNotMatch(html, /gitCardMode|workers\.insertBefore\(git/);
+  assert.match(html, /grid-column:\s*span var\(--git-span, 1\)/);
+  assert.match(html, /git\.style\.setProperty\("--git-span", String\(free\)\)/);
+  assert.match(html, /workers\.appendChild\(git\)/);
   assert.match(html, /app\.appendChild\(git\)/);
-  assert.match(html, /applyGitLayout\(\)/);
-  assert.match(html, /child !== gitCard/);
+  assert.match(html, /\.app\s*\{[^}]*overflow-y:\s*auto/);
 });
 
 test("every inline script block parses", () => {
@@ -322,6 +286,67 @@ test("the page paints branch colours through the theme variables when it can", (
   assert.match(html, /"var\(--branch-" \+ worker\.branchColorIndex/);
   assert.match(html, /"var\(--branch-neutral\)"/);
   assert.match(html, /swatch\.style\.background = worker\.branchColor/);
-  assert.match(html, /line\.style\.setProperty\("stroke", color\)/);
-  assert.match(html, /node\.style\.setProperty\("fill"/);
+  assert.match(html, /getComputedStyle\(document\.documentElement\)\.getPropertyValue\(name\)/);
+  assert.match(html, /ctx\.strokeStyle = color/);
+});
+
+test("the git rails are a canvas of binary glyphs drawn every frame, with main emphasized", () => {
+  assert.match(html, /<canvas id="git-lines"/);
+  assert.match(html, /window\.requestAnimationFrame\(gitFrame\)/);
+  assert.match(html, /function laneIsMain\(commit, lane\)/);
+  assert.match(html, /seg\.main \? "bold 11px" : "9px"/);
+  assert.match(html, /ctx\.lineWidth = seg\.main \? 6 : 4/);
+  assert.match(html, /var WAVE_SPEED = 0\.9/);
+  assert.match(html, /var MAIN_COLOR = "var\(--branch-0\)"/);
+});
+
+test("meters and PC load stay hidden unless the config shows them", () => {
+  assert.match(html, /\.usage\[hidden\]/);
+  assert.match(html, /getElementById\("usage"\)\.hidden = ui\.showUsage !== true/);
+  assert.match(html, /getElementById\("pc"\)\.hidden = ui\.showPc !== true/);
+});
+
+test("Claude cards share miniature groups of three once there are more than two", () => {
+  assert.match(html, /var MINI_GROUP_FROM = 2/);
+  assert.match(html, /batches\[worker\.miniGroup\]/);
+  assert.match(html, /\.worker-group \.mini\s*\{[^}]*zoom:\s*0\.5/);
+});
+
+test("git rows have a fixed time column, day separators, type badges and card animations", () => {
+  assert.match(html, /function dayLabel\(iso\)/);
+  assert.match(html, /function daySeparator\(label\)/);
+  assert.match(html, /function drawGap\(rails, previous, row\)/);
+  assert.match(html, /el\("span", "ctype ctype-"/);
+  assert.match(html, /\.commit, \.day-row\s*\{[^}]*grid-template-columns:\s*var\(--time-w\)/);
+  assert.match(html, /@keyframes card-in/);
+  assert.match(html, /@keyframes card-out/);
+  assert.match(html, /classList\.add\("is-entering"\)/);
+  assert.match(html, /classList\.add\("is-leaving"\)/);
+});
+
+test("a miniature group has its own frame coloured by state and animates as one", () => {
+  assert.match(html, /\.worker-group\s*\{[^}]*border:\s*1px solid var\(--border\)/);
+  assert.match(html, /\.worker-group\.group-working/);
+  assert.match(html, /group\.setAttribute\("data-key", "group:" \+ key\)/);
+  assert.match(html, /\.worker-group\.is-leaving/);
+});
+
+test("every render helper the page calls is defined", () => {
+  const defined = new Set(Array.from(html.matchAll(/function (\w+)\(/g)).map((match) => match[1]));
+  const called = Array.from(html.matchAll(/^\s{4}(render\w+|apply\w+|hide\w+|fill\w+)\(/gm)).map((match) => match[1]);
+  assert.ok(called.length > 3, "the render function calls its panel helpers");
+  called.forEach((name) => assert.ok(defined.has(name), name + " must be defined"));
+});
+
+test("an open tab reloads itself when the server reports a new page build", () => {
+  assert.match(html, /next\.buildId/);
+  assert.match(html, /window\.location\.reload\(\)/);
+});
+
+test("the git graph stays visible in card mode and commit nodes open a hover bubble", () => {
+  assert.doesNotMatch(html, /\.workers > \.git #git-lines\s*\{[^}]*display:\s*none/);
+  assert.match(html, /canvas\.addEventListener\("mousemove", onGitHover\)/);
+  assert.match(html, /canvas\.addEventListener\("mouseleave", hideGitTip\)/);
+  assert.match(html, /\.git-tip\.is-open/);
+  assert.match(html, /function fillGitTip\(tip, commit\)/);
 });

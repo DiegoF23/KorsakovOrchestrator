@@ -4,3 +4,6 @@
 monitor/translations.json
 monitor/fleet-monitor.config.json
 node_modules/
+
+# Monitor supervisor logs.
+monitor/monitor.*.log

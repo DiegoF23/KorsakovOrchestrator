@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maqueta árbol de git</title>
+<style>
+  :root { --bg:#020a04; --panel:#04140a; --live:#37ff7a; --dim:#5f9c76; --text:#c9f5d6; --warn:#ffb020; --blue:#4aa8ff; --violet:#b58cff; --border:rgba(55,255,122,.32); }
+  body { margin:0; background:var(--bg); color:var(--text); font:12px/1.4 Consolas, monospace; padding:14px; }
+  .bar { display:flex; gap:10px; align-items:center; margin-bottom:10px; color:var(--dim); flex-wrap:wrap; }
+  button { background:transparent; color:var(--live); border:1px solid var(--border); border-radius:4px; padding:3px 9px; font:inherit; cursor:pointer; }
+  button:hover { background:rgba(55,255,122,.12); }
+  .tree { border:1px solid var(--border); border-radius:5px; background:var(--panel); padding:8px 10px; max-width:980px; }
+  h2 { margin:0 0 6px; font-size:12px; letter-spacing:1px; color:var(--live); text-transform:uppercase; }
+  .wrap { position:relative; }
+  svg { position:absolute; left:78px; top:0; width:66px; overflow:visible; pointer-events:none; }
+  .row { display:grid; grid-template-columns:78px 66px 1fr; align-items:center; height:24px; }
+  .row.day { color:var(--dim); font-size:10.5px; letter-spacing:1px; text-transform:uppercase; }
+  .time { white-space:nowrap; color:var(--dim); text-align:right; padding-right:10px; font-variant-numeric:tabular-nums; }
+  .row.fresh .msg { animation:drop 380ms ease-out both; }
+  @keyframes drop { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:none; } }
+  .msg { display:flex; gap:7px; align-items:center; min-width:0; }
+  .sha { color:var(--dim); }
+  .type { padding:0 6px; border:1px solid currentColor; border-radius:3px; font-size:10px; text-transform:uppercase; }
+  .feat { color:var(--live); } .fix { color:var(--warn); } .docs { color:var(--blue); } .merge { color:var(--violet); } .test { color:#7ee0d0; }
+  .scope { color:var(--dim); }
+  .subject { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .branch { margin-left:auto; padding:0 6px; border:1px solid currentColor; border-radius:3px; font-size:10px; }
+  .flow { stroke-dasharray:5 7; animation:flow 700ms linear infinite; }
+  @keyframes flow { to { stroke-dashoffset:12; } }
+  .ring { fill:none; stroke-width:2; transform-box:fill-box; transform-origin:center; animation:pulse 1.4s ease-out 3; }
+  @keyframes pulse { from { transform:scale(1); opacity:.95; } to { transform:scale(3.4); opacity:0; } }
+</style>
+</head>
+<body>
+<div class="bar"><button id="add">Simular commit nuevo (rama alerts)</button><span>3 ramas: main, bulk-import (ya mergeada) y mail-alerts (abierta, con flujo animado)</span></div>
+<section class="tree">
+  <h2>Árbol de git · 75 commits</h2>
+  <div class="wrap" id="wrap"><svg id="svg"></svg><div id="list"></div></div>
+</section>
+<script>
+  var ROW = 24, LANE = 20, X0 = 12;
+  var COLORS = { 0: "#37ff7a", 1: "#4aa8ff", 2: "#ffb020" };
+  var NAMES = { 1: "feat/bulk-import", 2: "feat/mail-alerts" };
+  // Newest first. lane 0 = main. "mergeFrom" marks a merge commit joining that lane.
+  var items = [
+    { day: "Hoy" },
+    { lane: 2, t: "hace 6 min", sha: "f875339", type: "feat", scope: "alerts", s: "filter and paginate the alert-recipient list", tip: true },
+    { lane: 0, t: "hace 28 min", sha: "b8feff7", type: "merge", scope: "", s: "import the vehicle Excel wizard (feat/bulk-import)", mergeFrom: 1 },
+    { lane: 1, t: "hace 43 min", sha: "5bac505", type: "feat", scope: "vehicles", s: "add the vehicle import wizard and error cards" },
+    { lane: 2, t: "hace 1 h", sha: "25bde4a", type: "feat", scope: "alerts", s: "allow self and same-role e-mail notification switches" },
+    { day: "Ayer" },
+    { lane: 0, t: "hace 17 h", sha: "f52ea12", type: "fix", scope: "monitor", s: "show the real model of discovered Antigravity runs" },
+    { lane: 1, t: "hace 18 h", sha: "93ffb34", type: "test", scope: "vehicles", s: "validate and commit a vehicle Excel import" },
+    { lane: 2, t: "hace 19 h", sha: "8613275", type: "docs", scope: "alerts", s: "registrar las tareas del bloque de alertas" },
+    { lane: 0, t: "hace 20 h", sha: "488d62d", type: "feat", scope: "auth", s: "enforce a ten-minute resend cooldown" },
+    { lane: 0, t: "hace 21 h", sha: "0b7ac62", type: "docs", scope: "odd", s: "registrar las tareas, commits y verificaciones", fork: [1, 2] }
+  ];
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function y(i) { return i * ROW + ROW / 2; }
+  function x(l) { return X0 + l * LANE; }
+  function node(tag, attrs) { var n = document.createElementNS(SVGNS, tag); Object.keys(attrs).forEach(function (k) { n.setAttribute(k, attrs[k]); }); return n; }
+  function lanesOf(rows) {
+    // For each lane: first row (top) and last row (bottom) where its line is drawn.
+    var span = {};
+    rows.forEach(function (r, i) {
+      if (r.lane === undefined) return;
+      var s = span[r.lane] || (span[r.lane] = { top: i, bottom: i });
+      s.top = Math.min(s.top, i); s.bottom = Math.max(s.bottom, i);
+      if (r.mergeFrom) { var m = span[r.mergeFrom] || (span[r.mergeFrom] = { top: i, bottom: i }); m.top = Math.min(m.top, i); m.merged = true; m.mergeRow = i; }
+      if (r.fork) r.fork.forEach(function (f) { var q = span[f] || (span[f] = { top: i, bottom: i }); q.bottom = Math.max(q.bottom, i); q.forkRow = i; });
+    });
+    return span;
+  }
+  function render(freshIndex) {
+    var list = document.getElementById("list"), svg = document.getElementById("svg");
+    list.textContent = ""; svg.textContent = "";
+    items.forEach(function (r, i) {
+      var row = document.createElement("div");
+      row.className = "row" + (r.day ? " day" : "") + (i === freshIndex ? " fresh" : "");
+      var time = document.createElement("span"); time.className = "time"; time.textContent = r.day || r.t;
+      var rail = document.createElement("span");
+      row.appendChild(time); row.appendChild(rail);
+      if (!r.day) {
+        var msg = document.createElement("span"); msg.className = "msg";
+        [["sha", r.sha], ["type " + r.type, r.type], ["scope", r.scope ? "(" + r.scope + ")" : ""], ["subject", r.s]].forEach(function (p) {
+          var e = document.createElement("span"); e.className = p[0]; e.textContent = p[1]; msg.appendChild(e);
+        });
+        if (r.lane && NAMES[r.lane] && r.tip) { var b = document.createElement("span"); b.className = "branch"; b.style.color = COLORS[r.lane]; b.textContent = NAMES[r.lane]; msg.appendChild(b); }
+        row.appendChild(msg);
+      }
+      list.appendChild(row);
+    });
+    svg.setAttribute("height", items.length * ROW);
+    var span = lanesOf(items);
+    Object.keys(span).forEach(function (key) {
+      var l = Number(key), s = span[l], c = COLORS[l], xl = x(l);
+      var top = y(s.top), bottom = y(s.bottom), d;
+      if (l === 0) {
+        d = "M" + xl + "," + y(Math.max(s.top, 1)) + " L" + xl + "," + bottom;
+      } else {
+        d = "M" + xl + "," + top;
+        if (s.merged) d = "M" + x(0) + "," + top + " C" + x(0) + "," + (top + 12) + " " + xl + "," + (top + 4) + " " + xl + "," + (top + 16);
+        d += " L" + xl + "," + (bottom - 16) + " C" + xl + "," + (bottom - 4) + " " + x(0) + "," + (bottom - 12) + " " + x(0) + "," + bottom;
+      }
+      var line = node("path", { d: d, fill: "none", stroke: c, "stroke-width": 2, opacity: l === 0 ? 0.55 : 0.9 });
+      if (l === 2) line.setAttribute("class", "flow");
+      svg.appendChild(line);
+    });
+    items.forEach(function (r, i) {
+      if (r.lane === undefined) return;
+      var hollow = !!r.mergeFrom;
+      svg.appendChild(node("circle", { cx: x(r.lane), cy: y(i), r: hollow ? 5 : 6, fill: hollow ? "#020a04" : COLORS[r.lane], stroke: COLORS[r.lane], "stroke-width": 2 }));
+      if (i === freshIndex) svg.appendChild(node("circle", { cx: x(r.lane), cy: y(i), r: 6, class: "ring", stroke: COLORS[r.lane] }));
+    });
+  }
+  var n = 0;
+  document.getElementById("add").onclick = function () {
+    n += 1;
+    items.splice(1, 0, { lane: 2, t: "ahora", sha: Math.random().toString(16).slice(2, 9), type: "feat", scope: "alerts", s: "commit simulado número " + n, tip: true });
+    if (items[2] && items[2].tip) delete items[2].tip;
+    render(1);
+  };
+  render(-1);
+</script>
+</body>
+</html>

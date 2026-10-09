@@ -80,7 +80,76 @@ export function loadConfig(file) {
 // resolve like the top-level ones (against the config folder, with %VARS% and
 // ~ expanded) and name defaults to the repo folder. Pure and exported so the
 // normalization is unit-testable.
-export function resolveProjects(config) {
+// Projects Claude Code knows about: every folder of ~/.claude/projects with a
+// session, resolved to its real working directory (the transcripts record
+// "cwd"; the folder name alone is lossy). Git worktrees and temp folders are
+// and Claude scratch workspaces are skipped, and the newest project comes first.
+// Opt-in with "discoverClaudeProjects": true in the config. Cached briefly because the
+// project list is resolved on every request.
+const DISCOVERY_TTL_MS = 30000;
+let discoveryCache = { key: "", at: 0, value: [] };
+
+export function discoverClaudeProjects(home = os.homedir(), now = Date.now()) {
+  const root = path.join(home, ".claude", "projects");
+  if (discoveryCache.key === root && now - discoveryCache.at < DISCOVERY_TTL_MS) return discoveryCache.value;
+  const found = [];
+  let dirs = [];
+  try {
+    dirs = fs.readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  } catch {
+    dirs = [];
+  }
+  const temp = os.tmpdir().toLowerCase();
+  for (const dir of dirs) {
+    const full = path.join(root, dir.name);
+    let newest = null;
+    try {
+      for (const name of fs.readdirSync(full)) {
+        if (!name.endsWith(".jsonl")) continue;
+        const mtimeMs = fs.statSync(path.join(full, name)).mtimeMs;
+        if (!newest || mtimeMs > newest.mtimeMs) newest = { file: path.join(full, name), mtimeMs };
+      }
+    } catch {
+      continue;
+    }
+    if (!newest) continue;
+    const head = readFileHead(newest.file, 32768) ?? "";
+    const cwd = /"cwd":"((?:[^"\\]|\\.)*)"/.exec(head)?.[1];
+    if (!cwd) continue;
+    let repo;
+    try {
+      repo = JSON.parse(`"${cwd}"`);
+    } catch {
+      continue;
+    }
+    if (!fs.existsSync(repo) || (repo.toLowerCase() === temp || repo.toLowerCase().startsWith(temp + path.sep)) || /scratch-workspaces/i.test(repo)) continue;
+    try {
+      if (fs.statSync(path.join(repo, ".git")).isFile()) continue;
+    } catch {
+      // Not a git folder at all: still a project Claude shows.
+    }
+    found.push({ id: `cc-${dir.name.toLowerCase().replace(/^-+/, "").slice(0, 60)}`, name: path.basename(repo) || repo, repo, mtimeMs: newest.mtimeMs });
+  }
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  discoveryCache = { key: root, at: now, value: found };
+  return found;
+}
+
+export function resolveProjects(config, options = {}) {
+  const declared = resolveDeclaredProjects(config);
+  if (config?.discoverClaudeProjects !== true) return declared;
+  const seen = new Set(declared.map((project) => path.resolve(String(project.repo ?? "")).toLowerCase()));
+  const extra = [];
+  for (const project of discoverClaudeProjects(options.home)) {
+    const key = path.resolve(project.repo).toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    extra.push({ id: project.id, name: project.name, repo: project.repo, kitConfig: null });
+  }
+  return [...declared, ...extra];
+}
+
+function resolveDeclaredProjects(config) {
   const source = config ?? {};
   const baseDir = source.__baseDir ?? process.cwd();
   const entries = Array.isArray(source.projects)
@@ -120,10 +189,21 @@ function projectName(repo, fallback) {
 
 // Header data of the orchestrator: engine, model and effort as declared in
 // fleet-monitor.config.json, plus the ready-to-show "model · effort" text.
-export function orchestratorInfo(config) {
+// When the orchestrator is Claude Code and the project has a session
+// transcript, the model and effort come from the most recent one (the brain
+// follows /model); the config values are only the fallback.
+export function orchestratorInfo(config, repo = null, home = os.homedir()) {
   const raw = config?.orchestrator ?? {};
-  const model = raw.model ?? "";
-  const effort = raw.effort ?? "";
+  let model = raw.model ?? "";
+  let effort = raw.effort ?? "";
+  if ((raw.engine ?? "claude-code") === "claude-code" && repo) {
+    const latest = recentClaudeSessions(claudeProjectDir(repo, home), new Date(), { recentMs: Infinity, max: 1 })[0];
+    if (latest) {
+      const real = transcriptModel(latest.file);
+      model = real.model ?? model;
+      effort = real.effort ?? effort;
+    }
+  }
   return {
     engine: raw.engine ?? "claude-code",
     model,
@@ -152,6 +232,7 @@ export async function buildSnapshot(config, options = {}) {
     notices.push("No hay una configuración de kit declarada.");
   }
 
+  await refreshOpenCodeSessions(config, project);
   kit = withOrchestratorTracks(kit, project, config, now);
   const repo =
     project.repo ??
@@ -163,7 +244,10 @@ export async function buildSnapshot(config, options = {}) {
 
   const usages = await usageSnapshot(ctx);
   const builtWorkers = await buildWorkers(ctx);
-  const { workers, hiddenFinished, hiddenWorkers } = hideFinishedWorkers(builtWorkers, config, now);
+  const hideResult = hideFinishedWorkers(builtWorkers, config, now);
+  const workers = finishedByArrival(hideResult.workers);
+  const hiddenWorkers = finishedByArrival(hideResult.hiddenWorkers);
+  const hiddenFinished = hideResult.hiddenFinished;
   const pc = await memo("pc", seconds(config.systemCacheSeconds, 10), () => probePc(), {
     cpu: null,
     ram: null,
@@ -186,7 +270,9 @@ export async function buildSnapshot(config, options = {}) {
     generatedAt: now.toISOString(),
     pollSeconds: Number(config.pollSeconds) || 5,
     project: { id: project.id, name: project.name },
-    orchestrator: orchestratorInfo(config),
+    orchestrator: orchestratorInfo(config, repo),
+    // Meters and PC load are hidden unless the config turns them on.
+    ui: { showUsage: config?.ui?.showUsage === true, showPc: config?.ui?.showPc === true },
     usages,
     workers,
     hiddenWorkers,
@@ -244,6 +330,125 @@ const ORCHESTRATOR_WORKING_MS = 3 * 60000;
 const ORCHESTRATOR_RECENT_MS = 60 * 60000;
 const ORCHESTRATOR_MAX_SESSIONS = 3;
 
+// Time of the last event a transcript really recorded (the "timestamp" of its
+// last entries). A file's mtime can be refreshed by anything that rewrites the
+// folder, so activity is judged by the events, never by the mtime alone.
+const lastEventCache = new Map();
+export function transcriptLastEventMs(file, mtimeMs, maxBytes = 65536) {
+  const cached = lastEventCache.get(file);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.value;
+  let value = null;
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, maxBytes);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      let last = null;
+      for (const match of buffer.toString("utf8").matchAll(/"timestamp":"([^"]+)"/g)) last = match[1];
+      const time = last ? new Date(last).getTime() : NaN;
+      value = Number.isFinite(time) ? time : null;
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    value = null;
+  }
+  lastEventCache.set(file, { mtimeMs, value });
+  return value;
+}
+
+// Whether the agent has already given its final answer: the last user or
+// assistant entry of the transcript is an assistant message with no tool call
+// and a normal end of turn. A streamed answer without stop_reason counts once
+// the file has been quiet for a few seconds. Cached by mtime.
+const turnCache = new Map();
+const TURN_QUIET_MS = 8000;
+// Subagents launched together share one miniature group: they are clustered by
+// launch time (a gap of at most BATCH_GAP_MS keeps them in the same burst) and
+// every burst is cut in groups of BATCH_SIZE. The key is the launch time of
+// the group's first member, so it stays put while the group ages.
+export const BATCH_GAP_MS = 90000;
+export const BATCH_SIZE = 4;
+export function assignBatches(agents) {
+  const sorted = [...agents].sort((a, b) => a.birthMs - b.birthMs);
+  const keys = new Map();
+  let burst = [];
+  const flush = () => {
+    for (let i = 0; i < burst.length; i += BATCH_SIZE) {
+      const key = `batch-${Math.round(burst[i].birthMs)}`;
+      burst.slice(i, i + BATCH_SIZE).forEach((agent) => keys.set(agent.id, key));
+    }
+    burst = [];
+  };
+  sorted.forEach((agent) => {
+    if (burst.length && agent.birthMs - burst[burst.length - 1].birthMs > BATCH_GAP_MS) flush();
+    burst.push(agent);
+  });
+  flush();
+  return keys;
+}
+
+export function transcriptTurnComplete(file, mtimeMs, now = Date.now(), maxBytes = 131072) {
+  const cached = turnCache.get(file);
+  let verdict;
+  if (cached && cached.mtimeMs === mtimeMs) {
+    verdict = cached.verdict;
+  } else {
+    verdict = "unknown";
+    try {
+      const fd = fs.openSync(file, "r");
+      try {
+        const size = fs.fstatSync(fd).size;
+        const length = Math.min(size, maxBytes);
+        const buffer = Buffer.alloc(length);
+        fs.readSync(fd, buffer, 0, length, size - length);
+        const lines = buffer.toString("utf8").split(/\r?\n/).filter((line) => line.trim());
+        for (let i = lines.length - 1; i >= 0; i -= 1) {
+          let entry;
+          try {
+            entry = JSON.parse(lines[i]);
+          } catch {
+            continue;
+          }
+          if (entry?.type !== "assistant" && entry?.type !== "user") continue;
+          if (entry.type === "user") {
+            verdict = "open";
+          } else {
+            const raw = entry.message?.content;
+            const content = Array.isArray(raw)
+              ? raw
+              : typeof raw === "string" && raw.trim()
+                ? [{ type: "text", text: raw }]
+                : [];
+            const hasText = content.some((block) => block?.type === "text");
+            const hasTool = content.some((block) => block?.type === "tool_use");
+            const reason = entry.message?.stop_reason ?? null;
+            if (hasTool || reason === "tool_use" || !hasText) verdict = "open";
+            else verdict = reason === "end_turn" ? "done" : "maybe";
+          }
+          break;
+        }
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      verdict = "unknown";
+    }
+    turnCache.set(file, { mtimeMs, verdict });
+  }
+  if (verdict === "done") return true;
+  return verdict === "maybe" && now - mtimeMs >= TURN_QUIET_MS;
+}
+
+// mtime capped by the last recorded event: a touched file never looks newer
+// than what its agent actually did.
+function effectiveActivityMs(file, mtimeMs) {
+  const event = transcriptLastEventMs(file, mtimeMs);
+  return event === null ? mtimeMs : Math.min(mtimeMs, event);
+}
+
 export function claudeProjectDir(repo, home = os.homedir()) {
   if (!repo) return null;
   return path.join(home, ".claude", "projects", path.resolve(String(repo)).replace(/[^A-Za-z0-9]/g, "-"));
@@ -268,6 +473,8 @@ export function recentClaudeSessions(dir, now = new Date(), options = {}) {
     } catch {
       continue;
     }
+    if (now.getTime() - mtimeMs > recentMs) continue;
+    mtimeMs = effectiveActivityMs(file, mtimeMs);
     if (now.getTime() - mtimeMs > recentMs) continue;
     sessions.push({ id: entry.name.slice(0, -".jsonl".length), file, mtimeMs });
   }
@@ -330,19 +537,100 @@ export function recentClaudeSubagents(dir, now = new Date(), options = {}) {
       if (!name.endsWith(".jsonl")) continue;
       const file = path.join(subDir, name);
       let mtimeMs;
+      let birthMs;
       try {
-        mtimeMs = fs.statSync(file).mtimeMs;
+        const stat = fs.statSync(file);
+        mtimeMs = stat.mtimeMs;
+        birthMs = stat.birthtimeMs || stat.mtimeMs;
       } catch {
         continue;
       }
       if (now.getTime() - mtimeMs > recentMs) continue;
+      mtimeMs = effectiveActivityMs(file, mtimeMs);
+      if (now.getTime() - mtimeMs > recentMs) continue;
       const id = name.slice(0, -".jsonl".length).replace(/^agent-/, "");
       const meta = readJson(path.join(subDir, `${name.slice(0, -".jsonl".length)}.meta.json`)) ?? {};
-      found.push({ id, file, mtimeMs, meta });
+      found.push({ id, file, mtimeMs, birthMs, meta });
     }
   }
   found.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return found.slice(0, options.maxSubagents ?? 6);
+  return found.slice(0, options.maxSubagents ?? 12);
+}
+
+// -- OpenCode sessions ------------------------------------------------------
+// The shared OpenCode server lists every session with its folder, so the runs
+// an orchestrator launches by hand ("opencode run --dir <repo>") can be shown
+// without a kit track. A snapshot refreshes the per-repo cache (briefly cached
+// itself); withOrchestratorTracks reads it synchronously. Turn it off with
+// "opencodeDiscovery": false; the server defaults to 127.0.0.1:4096 and can be
+// set with "opencodeServer": { "host", "port" }.
+const OPENCODE_RECENT_MS = 60 * 60000;
+const OPENCODE_WORKING_MS = 3 * 60000;
+const OPENCODE_REFRESH_MS = 4000;
+const openCodeCache = new Map();
+
+function normalizeFolder(value) {
+  return path.resolve(String(value ?? "")).replace(/[\\/]+$/, "").toLowerCase();
+}
+
+export function openCodeServer(config) {
+  return {
+    host: config?.opencodeServer?.host ?? "127.0.0.1",
+    port: Number(config?.opencodeServer?.port) || 4096
+  };
+}
+
+export async function refreshOpenCodeSessions(config, project, now = Date.now()) {
+  if (config?.opencodeDiscovery === false || !project?.repo) return;
+  const key = normalizeFolder(project.repo);
+  const cached = openCodeCache.get(key);
+  if (cached && now - cached.at < OPENCODE_REFRESH_MS) return;
+  const server = openCodeServer(config);
+  const url = `http://${server.host}:${server.port}/session?directory=${encodeURIComponent(project.repo)}`;
+  let sessions = [];
+  try {
+    const response = await fetch(url, { signal: AbortSignal.timeout(1500) });
+    const body = response.ok ? await response.json() : [];
+    sessions = Array.isArray(body) ? body : [];
+  } catch {
+    sessions = [];
+  }
+  openCodeCache.set(key, { at: now, sessions });
+}
+
+export function openCodeSessionTracks(sessions, project, kit, now = new Date()) {
+  const wanted = normalizeFolder(project?.repo);
+  const known = (kit?.tracks ?? []).map((track) => String(track?.name ?? "").toLowerCase()).filter(Boolean);
+  const seenTitles = new Set();
+  const out = [];
+  const list = (Array.isArray(sessions) ? sessions : [])
+    .filter((session) => session?.id && normalizeFolder(session.directory) === wanted)
+    .sort((a, b) => (b?.time?.updated ?? 0) - (a?.time?.updated ?? 0));
+  for (const session of list) {
+    const updated = Number(session?.time?.updated);
+    if (!Number.isFinite(updated) || now.getTime() - updated > OPENCODE_RECENT_MS) continue;
+    const title = String(session.title ?? "").trim();
+    const words = title.toLowerCase().split(/\s+/);
+    if (known.some((name) => words.includes(name))) continue;
+    const dedupe = title || session.id;
+    if (seenTitles.has(dedupe)) continue;
+    seenTitles.add(dedupe);
+    const working = now.getTime() - updated <= OPENCODE_WORKING_MS;
+    out.push({
+      name: `oc-${String(session.id).slice(-8)}`,
+      engine: "opencode",
+      title: title || "Sesión de OpenCode",
+      label: "OpenCode",
+      workdir: project.repo,
+      sessionId: session.id,
+      branch: "main",
+      model: session.model?.id ? `${session.model.providerID ?? "opencode-go"}/${session.model.id}` : undefined,
+      __state: working ? "working" : "done",
+      __statusTime: new Date(updated).toISOString()
+    });
+    if (out.length >= 8) break;
+  }
+  return out;
 }
 
 // -- Antigravity (agy) CLI runs ----------------------------------------------
@@ -355,6 +643,9 @@ export function recentClaudeSubagents(dir, now = new Date(), options = {}) {
 // or the kit's worktree parent.
 export const AGY_BRAIN_RECENT_MS = 60 * 60000;
 const AGY_BRAIN_WORKING_MS = 3 * 60000;
+// A tool error is normally followed by the next step within seconds; this much
+// silence after one means the run ended on it.
+const AGY_ERROR_QUIET_MS = 25000;
 const AGY_BRAIN_MAX_CONVERSATIONS = 6;
 const AGY_BRAIN_HEAD_BYTES = 64 * 1024;
 
@@ -446,15 +737,47 @@ export function agyConversationTitle(text) {
     if (!entry || entry.type !== "USER_INPUT") continue;
     const content = String(entry.content ?? "");
     if (!content.trim()) continue;
-    const first = content
+    const lines = content
       .replace(/<[^>]*>/g, "\n")
       .split(/\r?\n/)
       .map((piece) => piece.trim())
-      .find(Boolean) ?? "";
+      .filter(Boolean);
+    // A prompt can name its task with a "Title: ..." line, which wins over
+    // the first line, which is often a rule ("You have NO terminal...").
+    const named = lines.slice(0, 12).find((piece) => /^title:\s*\S/i.test(piece));
+    const first = named ? named.replace(/^title:\s*/i, "") : (lines[0] ?? "");
     const title = first.replace(/^\/plan\b[ \t]*/i, "").trim();
     if (title) return title.slice(0, 80);
   }
   return "";
+}
+
+// True when the last entry of a brain transcript is a step with status ERROR.
+export function agyLastStepFailed(file, maxBytes = 65536) {
+  let text = "";
+  try {
+    const fd = fs.openSync(file, "r");
+    try {
+      const size = fs.fstatSync(fd).size;
+      const length = Math.min(size, maxBytes);
+      const buffer = Buffer.alloc(length);
+      fs.readSync(fd, buffer, 0, length, size - length);
+      text = buffer.toString("utf8");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    try {
+      return JSON.parse(lines[i])?.status === "ERROR";
+    } catch {
+      // The first line of the tail may be cut in half; keep walking up.
+    }
+  }
+  return false;
 }
 
 function readFileHead(file, maxBytes) {
@@ -503,9 +826,15 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
           now,
           options
         );
-  if (!sessions.length && !subagents.length && !conversations.length) return kit;
+  const openCodeTracks =
+    config?.opencodeDiscovery === false
+      ? []
+      : openCodeSessionTracks(openCodeCache.get(normalizeFolder(project.repo))?.sessions, project, kit, now);
+  if (!sessions.length && !subagents.length && !conversations.length && !openCodeTracks.length) return kit;
+  const batchKeys = assignBatches(subagents);
   const subagentTracks = subagents.map((agent) => {
-    const working = now.getTime() - agent.mtimeMs <= ORCHESTRATOR_WORKING_MS;
+    const answered = transcriptTurnComplete(agent.file, agent.mtimeMs, now.getTime());
+    const working = !answered && now.getTime() - agent.mtimeMs <= ORCHESTRATOR_WORKING_MS;
     const real = transcriptModel(agent.file);
     const description = String(agent.meta.description ?? "").trim() || `subagente ${agent.id.slice(0, 8)}`;
     return {
@@ -521,11 +850,13 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       // A subagent that stopped writing is finished; the board hides it after
       // cleanup.hideFinishedAfterMinutes like any other finished worker.
       __state: working ? "working" : "done",
-      __statusTime: new Date(agent.mtimeMs).toISOString()
+      __statusTime: new Date(agent.mtimeMs).toISOString(),
+      miniGroup: batchKeys.get(agent.id) ?? null
     };
   });
   const tracks = sessions.map((session) => {
-    const working = now.getTime() - session.mtimeMs <= ORCHESTRATOR_WORKING_MS;
+    const answered = transcriptTurnComplete(session.file, session.mtimeMs, now.getTime());
+    const working = !answered && now.getTime() - session.mtimeMs <= ORCHESTRATOR_WORKING_MS;
     const real = transcriptModel(session.file);
     return {
       name: `${ORCHESTRATOR_TRACK_PREFIX}${session.id.slice(0, 8)}`,
@@ -537,14 +868,18 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       branch: "main",
       model: real.model ?? config?.orchestrator?.model,
       effort: real.effort ?? config?.orchestrator?.effort,
-      __state: working ? "working" : "waiting",
+      __state: working ? "working" : answered ? "done" : "waiting",
       __statusTime: new Date(session.mtimeMs).toISOString()
     };
   });
   const agyTracks = conversations.map((conversation) => {
     // No status file exists for a discovered run, so a transcript that stopped
     // growing reads as finished and ages out like any other done card.
-    const working = now.getTime() - conversation.mtimeMs <= AGY_BRAIN_WORKING_MS;
+    const quietMs = now.getTime() - conversation.mtimeMs;
+    const working = quietMs <= AGY_BRAIN_WORKING_MS;
+    // A run whose last step failed and that then went quiet was cut short
+    // (for example a denied command): show it as stopped, not as working.
+    const failed = quietMs > AGY_ERROR_QUIET_MS && agyLastStepFailed(conversation.file);
     return {
       name: `agy-${conversation.id.slice(0, 8)}`,
       engine: "antigravity",
@@ -555,11 +890,15 @@ export function withOrchestratorTracks(kit, project, config = {}, now = new Date
       workdir: project.repo,
       activityFile: conversation.file,
       activityFormat: "brain",
-      __state: working ? "working" : "done",
+      __state: failed ? "error" : working ? "working" : "done",
       __statusTime: new Date(conversation.mtimeMs).toISOString()
     };
   });
-  return { ...(kit ?? {}), tracks: [...subagentTracks, ...tracks, ...agyTracks, ...(kit?.tracks ?? [])] };
+  return {
+    ...(kit ?? {}),
+    server: kit?.server ?? (openCodeTracks.length ? openCodeServer(config) : undefined),
+    tracks: [...subagentTracks, ...tracks, ...agyTracks, ...openCodeTracks, ...(kit?.tracks ?? [])]
+  };
 }
 
 // The kit's worktree parent resolved like buildSnapshot does (against the kit
@@ -614,11 +953,36 @@ export function hideFinishedWorkers(workers, config, now = new Date()) {
   }
   const visible = [];
   const hidden = [];
+  const batchStays = new Set();
   for (const worker of list) {
-    if (isFinishedWorkerOlderThan(worker, thresholdMinutes, now)) hidden.push(worker);
+    if (worker?.miniGroup && !isFinishedWorkerOlderThan(worker, thresholdMinutes, now)) batchStays.add(worker.miniGroup);
+  }
+  for (const worker of list) {
+    const old = isFinishedWorkerOlderThan(worker, thresholdMinutes, now);
+    const gone = worker?.miniGroup ? old && !batchStays.has(worker.miniGroup) : old;
+    if (gone) hidden.push(worker);
     else visible.push(worker);
   }
   return { workers: visible, hiddenFinished: hidden.length, hiddenWorkers: hidden };
+}
+
+// Active cards keep their order; finished ones (done or error) go after them,
+// the one that finished last first, so a fresh arrival heads the finished
+// group and pushes the older ones down.
+export function finishedByArrival(workers) {
+  const list = Array.isArray(workers) ? workers : [];
+  const isFinished = (w) => (w?.stateKind || w?.state) === "done" || (w?.stateKind || w?.state) === "error";
+  const time = (w) => {
+    const t = new Date(w?.statusTime ?? "").getTime();
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const active = list.filter((w) => !isFinished(w));
+  const finished = list.filter(isFinished).sort((a, b) => {
+    const ta = time(a);
+    const tb = time(b);
+    return ta === tb ? 0 : tb > ta ? 1 : -1;
+  });
+  return [...active, ...finished];
 }
 
 function isFinishedWorkerOlderThan(worker, thresholdMinutes, now) {
@@ -673,7 +1037,7 @@ async function buildWorker(track, ctx) {
 
   const [activity, lastCommit] = await Promise.all([
     adapter
-      .activity({ name, workdir, activityFile, activityFormat: track.activityFormat }, ctx)
+      .activity({ name, workdir, activityFile, activityFormat: track.activityFormat, sessionId: track.sessionId }, ctx)
       .catch(() => ({ events: [], notice: "sin actividad visible" })),
     gitLastCommit(ctx.repo, branch)
   ]);
@@ -715,7 +1079,8 @@ async function buildWorker(track, ctx) {
     branch,
     lastCommit,
     activity,
-    stepsSupported: typeof adapter.steps === "function"
+    stepsSupported: typeof adapter.steps === "function",
+    miniGroup: track.miniGroup ?? null
   };
 }
 
@@ -761,7 +1126,7 @@ export async function buildWorkerSteps(config, options = {}) {
   const workdir = resolveKitPath(track.workdir, kit, kitDir, baseDir);
   const activityFile = resolveKitPath(track.activityFile, kit, kitDir, baseDir);
   try {
-    const result = await adapter.steps({ name, workdir, activityFile, activityFormat: track.activityFormat }, ctx);
+    const result = await adapter.steps({ name, workdir, activityFile, activityFormat: track.activityFormat, sessionId: track.sessionId }, ctx);
     return { engine, steps: result?.steps ?? [], notice: result?.notice ?? null };
   } catch {
     return { engine, steps: [], notice: "sin pasos visibles" };
@@ -873,7 +1238,21 @@ async function gitGraph(repo) {
       ["-C", repo, "log", "--all", "--date-order", "--format=%H|%P|%D|%s|%ct", "-n", String(GIT_LOG_LIMIT)],
       { timeout: 10000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }
     );
-    const rows = assignLanes(parseGitLog(stdout));
+    let mainShas = null;
+    for (const name of ["main", "master"]) {
+      try {
+        const chain = await execFileAsync(
+          "git",
+          ["-C", repo, "rev-list", "--first-parent", "-n", String(GIT_LOG_LIMIT), name],
+          { timeout: 10000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }
+        );
+        mainShas = new Set(chain.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean));
+        break;
+      } catch {
+        // No such branch: try the next name.
+      }
+    }
+    const rows = assignLanes(parseGitLog(stdout), { mainShas });
     return { commits: rows, branches: collectBranches(rows), error: null };
   } catch {
     return { commits: [], branches: [], error: "no se pudo leer el árbol de git" };

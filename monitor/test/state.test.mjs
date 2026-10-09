@@ -12,6 +12,11 @@ import {
   buildWorkers,
   GIT_LOG_LIMIT,
   hideFinishedWorkers,
+  discoverClaudeProjects,
+  agyConversationTitle,
+  agyLastStepFailed,
+  recentClaudeSubagents,
+  finishedByArrival,
   orchestratorInfo,
   resolveProjects
 } from "../lib/state.mjs";
@@ -431,4 +436,158 @@ test("a board:false track still shows while its status says it is running", asyn
     now
   });
   assert.deepEqual(workers.map((worker) => worker.name), ["live"]);
+});
+test("finishedByArrival keeps active cards first and the latest finished first", () => {
+  const out = finishedByArrival([
+    { name: "old", stateKind: "done", statusTime: "2026-10-07T01:00:00Z" },
+    { name: "run", stateKind: "working" },
+    { name: "new", stateKind: "error", statusTime: "2026-10-07T05:00:00Z" }
+  ]);
+  assert.deepEqual(out.map((w) => w.name), ["run", "new", "old"]);
+});
+
+test("orchestratorInfo reads the model of the latest project session", async () => {
+  const fsx = await import("node:fs");
+  const osx = await import("node:os");
+  const pathx = await import("node:path");
+  const home = fsx.mkdtempSync(pathx.join(osx.tmpdir(), "orch-"));
+  const repo = pathx.join(home, "repo");
+  const dir = pathx.join(home, ".claude", "projects", pathx.resolve(repo).replace(/[^A-Za-z0-9]/g, "-"));
+  fsx.mkdirSync(dir, { recursive: true });
+  fsx.writeFileSync(pathx.join(dir, "s1.jsonl"), JSON.stringify({ model: "claude-sonnet-5-5" }) + String.fromCharCode(10) + JSON.stringify({ effort: "low" }) + String.fromCharCode(10));
+  const info = orchestratorInfo({ orchestrator: { engine: "claude-code", model: "claude-opus-5-5", effort: "high" } }, repo, home);
+  assert.equal(info.model, "claude-sonnet-5-5");
+  assert.equal(info.effort, "low");
+  assert.equal(orchestratorInfo({ orchestrator: { engine: "codex", model: "x" } }, repo, home).model, "x");
+});
+
+test("a subagent file touched today but last active days ago is not recent", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "touch-"));
+  const sub = path.join(home, "sess", "subagents");
+  fs.mkdirSync(sub, { recursive: true });
+  const old = new Date(Date.now() - 5 * 86400000).toISOString();
+  fs.writeFileSync(path.join(sub, "agent-old.jsonl"), JSON.stringify({ timestamp: old }) + String.fromCharCode(10));
+  const fresh = new Date().toISOString();
+  fs.writeFileSync(path.join(sub, "agent-new.jsonl"), JSON.stringify({ timestamp: fresh }) + String.fromCharCode(10));
+  const found = recentClaudeSubagents(home, new Date(), { recentMs: 3600000 });
+  assert.deepEqual(found.map((f) => f.id), ["new"]);
+});
+
+test("an agy run whose last step is an ERROR reads as failed; a normal tail does not", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agyerr-"));
+  const nl = String.fromCharCode(10);
+  const bad = path.join(dir, "bad.jsonl");
+  const ok = path.join(dir, "ok.jsonl");
+  fs.writeFileSync(bad, JSON.stringify({ status: "DONE" }) + nl + JSON.stringify({ status: "ERROR" }) + nl);
+  fs.writeFileSync(ok, JSON.stringify({ status: "ERROR" }) + nl + JSON.stringify({ status: "DONE" }) + nl);
+  assert.equal(agyLastStepFailed(bad), true);
+  assert.equal(agyLastStepFailed(ok), false);
+  assert.equal(agyLastStepFailed(path.join(dir, "missing.jsonl")), false);
+});
+
+test("an agy title prefers a Title line over a leading rule line", () => {
+  const nl = String.fromCharCode(10);
+  const content = "You have NO terminal: never run anything." + nl + "Title: Review the S2 schema";
+  const line = JSON.stringify({ type: "USER_INPUT", content });
+  assert.equal(agyConversationTitle(line), "Review the S2 schema");
+  assert.equal(agyConversationTitle(JSON.stringify({ type: "USER_INPUT", content: "Plain first line" })), "Plain first line");
+});
+
+test("Claude Code projects are discovered from their transcripts, only when enabled", () => {
+  const home = fs.mkdtempSync(path.join(os.homedir(), ".disc-test-"));
+  try {
+    const repo = path.join(home, "my-app");
+    fs.mkdirSync(repo, { recursive: true });
+    const dir = path.join(home, ".claude", "projects", "C--my-app");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "s.jsonl"), JSON.stringify({ cwd: repo }) + String.fromCharCode(10));
+    const found = discoverClaudeProjects(home, Date.now() + 999999);
+    assert.deepEqual(found.map((p) => p.name), ["my-app"]);
+    assert.equal(resolveProjects({ __baseDir: home, repo }, { home }).length, 1);
+    const on = resolveProjects({ __baseDir: home, repo: path.join(home, "other"), discoverClaudeProjects: true }, { home });
+    assert.ok(on.some((p) => p.name === "my-app"));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("a transcript whose last entry is a final assistant answer reads as answered", async () => {
+  const { transcriptTurnComplete } = await import("../lib/state.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turn-"));
+  const nl = String.fromCharCode(10);
+  const write = (name, entries) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, entries.map((e) => JSON.stringify(e)).join(nl) + nl);
+    return file;
+  };
+  const answer = { type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: [{ type: "text", text: "hecho" }] } };
+  const tool = { type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content: [{ type: "tool_use", name: "Bash" }] } };
+  const prompt = { type: "user", message: { role: "user", content: "hola" } };
+  assert.equal(transcriptTurnComplete(write("a.jsonl", [prompt, tool, answer]), 1, 1), true);
+  assert.equal(transcriptTurnComplete(write("b.jsonl", [prompt, answer, prompt]), 2, 1), false);
+  assert.equal(transcriptTurnComplete(write("c.jsonl", [prompt, tool]), 3, 1), false);
+  const streamed = { type: "assistant", message: { role: "assistant", stop_reason: null, content: [{ type: "text", text: "..." }] } };
+  assert.equal(transcriptTurnComplete(write("d.jsonl", [prompt, streamed]), 4, 5000), false);
+  assert.equal(transcriptTurnComplete(write("e.jsonl", [prompt, streamed]), 5, 20000), true);
+});
+
+test("finishedByArrival is stable when several finished cards have no valid time", () => {
+  const out = finishedByArrival([
+    { name: "a", stateKind: "done", statusTime: null },
+    { name: "b", stateKind: "done", statusTime: "invalid" },
+    { name: "c", stateKind: "done", statusTime: "2026-10-07T05:00:00Z" }
+  ]);
+  assert.equal(out[0].name, "c");
+  assert.deepEqual(out.slice(1).map((w) => w.name), ["a", "b"]);
+});
+
+test("an assistant answer whose content is a plain string counts as text", async () => {
+  const { transcriptTurnComplete } = await import("../lib/state.mjs");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "turnstr-"));
+  const file = path.join(dir, "s.jsonl");
+  fs.writeFileSync(file, JSON.stringify({ type: "assistant", message: { role: "assistant", stop_reason: "end_turn", content: "listo" } }) + String.fromCharCode(10));
+  assert.equal(transcriptTurnComplete(file, 77, 1), true);
+});
+
+test("subagents launched in one burst share batches of four; a batch hides only with its last member", async () => {
+  const { assignBatches } = await import("../lib/state.mjs");
+  const agents = [];
+  for (let i = 0; i < 7; i += 1) agents.push({ id: "a" + i, birthMs: 1000000 + i * 500 });
+  agents.push({ id: "late", birthMs: 1000000 + 10 * 60000 });
+  const keys = assignBatches(agents);
+  assert.equal(new Set([keys.get("a0"), keys.get("a1"), keys.get("a2"), keys.get("a3")]).size, 1);
+  assert.notEqual(keys.get("a3"), keys.get("a4"));
+  assert.equal(keys.get("a4"), keys.get("a6"));
+  assert.notEqual(keys.get("late"), keys.get("a6"));
+
+  const now = new Date("2026-10-08T12:00:00Z");
+  const old = "2026-10-08T11:50:00Z";
+  const fresh = "2026-10-08T11:59:30Z";
+  const cfg = { cleanup: { hideFinishedAfterMinutes: 2 } };
+  const mk = (name, statusTime, miniGroup) => ({ name, stateKind: "done", statusTime, miniGroup });
+  const kept = hideFinishedWorkers([mk("x", old, "b1"), mk("y", fresh, "b1")], cfg, now);
+  assert.equal(kept.workers.length, 2);
+  const gone = hideFinishedWorkers([mk("x", old, "b1"), mk("y", old, "b1"), mk("z", old, null)], cfg, now);
+  assert.equal(gone.workers.length, 0);
+  assert.equal(gone.hiddenWorkers.length, 3);
+});
+
+test("OpenCode sessions of the project folder become cards, newest title once, skipping kit tracks", async () => {
+  const { openCodeSessionTracks } = await import("../lib/state.mjs");
+  const now = new Date("2026-10-08T12:00:00Z");
+  const repo = path.resolve(os.tmpdir(), "oc-repo");
+  const at = (minutesAgo) => now.getTime() - minutesAgo * 60000;
+  const sessions = [
+    { id: "ses_aaaaaaaa11", title: "sabueso-1", directory: repo, time: { updated: at(1) }, model: { providerID: "opencode-go", id: "longcat-2.5-preview-free" } },
+    { id: "ses_bbbbbbbb22", title: "sabueso-1", directory: repo, time: { updated: at(30) } },
+    { id: "ses_cccccccc33", title: "mail-alerts attempt 1", directory: repo, time: { updated: at(2) } },
+    { id: "ses_dddddddd44", title: "old", directory: repo, time: { updated: at(300) } },
+    { id: "ses_eeeeeeee55", title: "other", directory: path.resolve(os.tmpdir(), "elsewhere"), time: { updated: at(1) } }
+  ];
+  const tracks = openCodeSessionTracks(sessions, { repo }, { tracks: [{ name: "mail-alerts" }] }, now);
+  assert.equal(tracks.length, 1);
+  assert.equal(tracks[0].title, "sabueso-1");
+  assert.equal(tracks[0].sessionId, "ses_aaaaaaaa11");
+  assert.equal(tracks[0].__state, "working");
+  assert.equal(tracks[0].model, "opencode-go/longcat-2.5-preview-free");
 });
