@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Maqueta árbol v3</title>
+<style>
+  :root { --bg:#010a04; --panel:#031209; --live:#37ff7a; --dim:#5f9c76; --text:#c9f5d6; --warn:#e8ff5a; --blue:#4fe0d0; --violet:#9dffb0; --border:rgba(55,255,122,.32); }
+  body { margin:0; background:var(--bg); color:var(--text); font:12px/1.4 Consolas, monospace; padding:14px; }
+  .bar { display:flex; gap:10px; align-items:center; margin-bottom:10px; color:var(--dim); flex-wrap:wrap; }
+  button { background:transparent; color:var(--live); border:1px solid var(--border); border-radius:4px; padding:3px 9px; font:inherit; cursor:pointer; }
+  button:hover { background:rgba(55,255,122,.12); }
+  .tree { border:1px solid var(--border); border-radius:5px; background:var(--panel); padding:8px 10px; max-width:1020px; box-shadow:0 0 18px rgba(55,255,122,.08) inset; }
+  h2 { margin:0 0 6px; font-size:12px; letter-spacing:1px; color:var(--live); text-transform:uppercase; text-shadow:0 0 8px rgba(55,255,122,.6); }
+  .wrap { position:relative; }
+  svg { position:absolute; left:84px; top:0; width:84px; overflow:visible; pointer-events:none; }
+  .row { display:grid; grid-template-columns:84px 84px 1fr; align-items:center; height:24px; }
+  .row.day { color:var(--dim); font-size:10.5px; letter-spacing:1px; text-transform:uppercase; }
+  .time { white-space:nowrap; color:var(--dim); text-align:right; padding-right:10px; font-variant-numeric:tabular-nums; }
+  .row.fresh .msg { animation:drop 380ms ease-out both; }
+  @keyframes drop { from { opacity:0; transform:translateY(-10px); } to { opacity:1; transform:none; } }
+  .msg { display:flex; gap:7px; align-items:center; min-width:0; }
+  .sha { color:var(--dim); }
+  .type { padding:0 6px; border:1px solid currentColor; border-radius:3px; font-size:10px; text-transform:uppercase; }
+  .feat { color:var(--live); } .fix { color:#e8ff5a; } .docs { color:#4fe0d0; } .merge { color:#9dffb0; } .test { color:#7ee0a0; } .chore { color:#8aa89a; }
+  .scope { color:var(--dim); }
+  .subject { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .branch { margin-left:auto; padding:0 6px; border:1px solid currentColor; border-radius:3px; font-size:10px; white-space:nowrap; }
+  .breathe { animation:breathe 3.2s ease-in-out infinite; }
+  @keyframes breathe { 0%,100% { opacity:.55; } 50% { opacity:1; } }
+  .spark { fill:none; stroke-linecap:round; stroke-dasharray:3 120; animation:spark 2.6s linear infinite; }
+  @keyframes spark { to { stroke-dashoffset:123; } }
+  .ring { fill:none; stroke-width:2; transform-box:fill-box; transform-origin:center; animation:pulse 1.4s ease-out 3; }
+  @keyframes pulse { from { transform:scale(1); opacity:.95; } to { transform:scale(3.4); opacity:0; } }
+  .tip { transform-box:fill-box; transform-origin:center; animation:tip 1.8s ease-in-out infinite; }
+  @keyframes tip { 0%,100% { transform:scale(1); } 50% { transform:scale(1.35); } }
+</style>
+</head>
+<body>
+<div class="bar"><button id="add">Simular commit nuevo (mail-alerts)</button><span>Dígitos binarios que suben por cada rama · nodo de la rama abierta latiendo</span></div>
+<section class="tree">
+  <h2>Árbol de git · 75 commits</h2>
+  <div class="wrap" id="wrap">
+    <svg id="svg">
+      <defs>
+        <filter id="blur" x="-50%" y="-5%" width="200%" height="110%"><feGaussianBlur stdDeviation="3"/></filter>
+        <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="2.2" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+      </defs>
+      <g id="layer"></g>
+    </svg>
+    <div id="list"></div>
+  </div>
+</section>
+<script>
+  var ROW = 24, LANE = 22, X0 = 14;
+  var COLORS = { 0: "#37ff7a", 1: "#4fe0d0", 2: "#e8ff5a", 3: "#9dffb0" };
+  var NAMES = { 1: "feat/bulk-import", 2: "feat/mail-alerts", 3: "fix/odometer" };
+  // Newest first. lane 0 = main. mergeFrom: merge commit joining that lane. fork: lanes that branch off here.
+  var items = [
+    { day: "Hoy" },
+    { lane: 2, t: "hace 6 min", sha: "f875339", type: "feat", scope: "alerts", s: "filter and paginate the alert-recipient list", tip: true },
+    { lane: 2, t: "hace 11 min", sha: "25bde4a", type: "feat", scope: "alerts", s: "allow self and same-role e-mail notification switches" },
+    { lane: 0, t: "hace 28 min", sha: "b8feff7", type: "merge", scope: "", s: "vehicle import wizard (feat/bulk-import)", mergeFrom: 1 },
+    { lane: 1, t: "hace 34 min", sha: "39dd4b8", type: "feat", scope: "vehicles", s: "validate and commit a vehicle Excel import" },
+    { lane: 2, t: "hace 41 min", sha: "8613275", type: "feat", scope: "auth", s: "replace the e-mail confirmation link with a six-digit code" },
+    { lane: 1, t: "hace 43 min", sha: "cfa4e08", type: "feat", scope: "vehicles", s: "add the vehicle import template download endpoint" },
+    { lane: 0, t: "hace 50 min", sha: "5bac505", type: "test", scope: "alerts", s: "give the recipient filter spec a company-wide actor" },
+    { lane: 1, t: "hace 51 min", sha: "4334889", type: "fix", scope: "auth", s: "measure the confirmation cooldown on the app clock" },
+    { lane: 2, t: "hace 1 h", sha: "488d62d", type: "feat", scope: "auth", s: "enforce a ten-minute resend cooldown for confirmation e-mails" },
+    { day: "Ayer" },
+    { lane: 0, t: "hace 17 h", sha: "0b7ac62", type: "docs", scope: "odd", s: "registrar las tareas, commits y verificaciones de la ronda 3" },
+    { lane: 3, t: "hace 17 h", sha: "9992211", type: "fix", scope: "odometer", s: "corregir el cálculo de lecturas con saltos sospechosos" },
+    { lane: 0, t: "hace 18 h", sha: "de3aea3", type: "test", scope: "alerts", s: "mantener determinísticos los casos BR-086", mergeFrom: 3 },
+    { lane: 1, t: "hace 18 h", sha: "c5f5c5a", type: "chore", scope: "web", s: "wizard de importación: estructura base" },
+    { lane: 0, t: "hace 19 h", sha: "e5127dd", type: "fix", scope: "api", s: "eliminar la importación Inject no utilizada" },
+    { lane: 3, t: "hace 19 h", sha: "1c277c4", type: "fix", scope: "odometer", s: "validar odómetro contra la última lectura" },
+    { lane: 0, t: "hace 20 h", sha: "8b23528", type: "feat", scope: "web", s: "convertir Mis preferencias en el perfil de usuario" },
+    { lane: 2, t: "hace 20 h", sha: "77209d5", type: "docs", scope: "alerts", s: "registrar el bloque de alertas por correo", },
+    { day: "Hace 2 d" },
+    { lane: 0, t: "hace 2 d", sha: "ca5afb3", type: "feat", scope: "trailers", s: "link acoplados a través de las sucursales de la empresa", fork: [1, 2, 3] }
+  ];
+  var glyphs = [];
+  // Brightness travels up each line as a wave; digits flip while they are lit.
+  function tick(ms) {
+    var t = ms / 1000;
+    glyphs.forEach(function (g) {
+      var w = Math.sin(6.2832 * (g.s / 130 + t * 0.45 + g.lane * 0.3));
+      var a = w > 0 ? Math.pow(w, 3) : 0;
+      g.tx.setAttribute("opacity", (0.12 + 0.88 * a).toFixed(2));
+      g.tx.setAttribute("fill", a > 0.85 ? "#eafff1" : g.color);
+      if (a > 0.7 && Math.random() < 0.04) g.tx.textContent = Math.random() < 0.5 ? "0" : "1";
+    });
+    requestAnimationFrame(tick);
+  }
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function y(i) { return i * ROW + ROW / 2; }
+  function x(l) { return X0 + l * LANE; }
+  function el(tag, attrs, parent) { var n = document.createElementNS(SVGNS, tag); Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); }); if (parent) parent.appendChild(n); return n; }
+  function lanesOf(rows) {
+    var span = {};
+    rows.forEach(function (r, i) {
+      if (r.lane === undefined) return;
+      var s = span[r.lane] || (span[r.lane] = { top: i, bottom: i });
+      s.top = Math.min(s.top, i); s.bottom = Math.max(s.bottom, i);
+      if (r.mergeFrom) { var m = span[r.mergeFrom] || (span[r.mergeFrom] = { top: i, bottom: i }); m.top = Math.min(m.top, i); m.merged = true; }
+      if (r.fork) r.fork.forEach(function (f) { var q = span[f] || (span[f] = { top: i, bottom: i }); q.bottom = Math.max(q.bottom, i); });
+    });
+    return span;
+  }
+  function pathFor(l, s) {
+    var xl = x(l), top = y(s.top), bottom = y(s.bottom);
+    if (l === 0) return "M" + xl + "," + y(Math.max(s.top, 1)) + " L" + xl + "," + bottom;
+    var d = "M" + xl + "," + top;
+    if (s.merged) d = "M" + x(0) + "," + top + " C" + x(0) + "," + (top + 14) + " " + xl + "," + (top + 4) + " " + xl + "," + (top + 20);
+    return d + " L" + xl + "," + (bottom - 20) + " C" + xl + "," + (bottom - 4) + " " + x(0) + "," + (bottom - 14) + " " + x(0) + "," + bottom;
+  }
+  function render(freshIndex) {
+    var list = document.getElementById("list"), layer = document.getElementById("layer"), svg = document.getElementById("svg");
+    list.textContent = ""; layer.textContent = "";
+    items.forEach(function (r, i) {
+      var row = document.createElement("div");
+      row.className = "row" + (r.day ? " day" : "") + (i === freshIndex ? " fresh" : "");
+      var time = document.createElement("span"); time.className = "time"; time.textContent = r.day || r.t;
+      row.appendChild(time); row.appendChild(document.createElement("span"));
+      if (!r.day) {
+        var msg = document.createElement("span"); msg.className = "msg";
+        [["sha", r.sha], ["type " + r.type, r.type], ["scope", r.scope ? "(" + r.scope + ")" : ""], ["subject", r.s]].forEach(function (p) {
+          var e = document.createElement("span"); e.className = p[0]; e.textContent = p[1]; msg.appendChild(e);
+        });
+        if (r.lane && r.tip) { var b = document.createElement("span"); b.className = "branch"; b.style.color = COLORS[r.lane]; b.textContent = NAMES[r.lane]; msg.appendChild(b); }
+        row.appendChild(msg);
+      }
+      list.appendChild(row);
+    });
+    svg.setAttribute("height", items.length * ROW);
+    var span = lanesOf(items); glyphs = [];
+    // A merged or finished branch keeps its name on the row where it forks off.
+    items.forEach(function (r, i) {
+      if (!r.fork) return;
+      var msg = list.children[i].querySelector(".msg");
+      r.fork.forEach(function (f) { var b = document.createElement("span"); b.className = "branch"; b.style.color = COLORS[f]; b.style.marginLeft = b.previousSibling ? "4px" : "auto"; b.textContent = NAMES[f]; msg.appendChild(b); });
+    });
+    Object.keys(span).forEach(function (key) {
+      var l = Number(key), d = pathFor(l, span[l]), c = COLORS[l];
+      el("path", { d: d, fill: "none", stroke: c, "stroke-width": 7, opacity: 0.16, filter: "url(#blur)", class: "breathe" }, layer);
+      var core = el("path", { d: d, fill: "none", stroke: c, "stroke-width": 1.2, opacity: 0.32, "stroke-linecap": "round" }, layer);
+      var total = core.getTotalLength();
+      for (var s = 6; s < total; s += 13) {
+        var p = core.getPointAtLength(s);
+        var tx = el("text", { x: p.x, y: p.y + 3.5, "text-anchor": "middle", "font-size": 10, "font-family": "Consolas, monospace", fill: c, opacity: 0.15 }, layer);
+        tx.textContent = Math.random() < 0.5 ? "0" : "1";
+        glyphs.push({ tx: tx, s: s, lane: l, color: c });
+      }
+    });
+    items.forEach(function (r, i) {
+      if (r.lane === undefined) return;
+      var hollow = !!r.mergeFrom, c = COLORS[r.lane];
+      var n = el("circle", { cx: x(r.lane), cy: y(i), r: hollow ? 5 : 5.5, fill: hollow ? "#010a04" : c, stroke: c, "stroke-width": 2, filter: "url(#glow)" }, layer);
+      if (r.tip) n.setAttribute("class", "tip");
+      if (i === freshIndex) el("circle", { cx: x(r.lane), cy: y(i), r: 6, class: "ring", stroke: c }, layer);
+    });
+  }
+  var n = 0;
+  document.getElementById("add").onclick = function () {
+    n += 1;
+    items.forEach(function (r) { delete r.tip; });
+    items.splice(1, 0, { lane: 2, t: "ahora", sha: Math.random().toString(16).slice(2, 9), type: "feat", scope: "alerts", s: "commit simulado número " + n, tip: true });
+    render(1);
+  };
+  render(-1);
+  requestAnimationFrame(tick);
+</script>
+</body>
+</html>
