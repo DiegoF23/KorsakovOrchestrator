@@ -7,3 +7,7 @@ node_modules/
 
 # Monitor supervisor logs.
 monitor/monitor.*.log
+
+# Personal background images (not redistributed).
+monitor/public/img/*
+!monitor/public/img/.gitkeep
