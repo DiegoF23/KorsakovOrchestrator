@@ -1,0 +1,1 @@
+{ "name": "monitor-autoopen", "version": "0.1.0", "description": "Opens the fleet monitor in the built-in browser when a session starts, if the monitor is running." }

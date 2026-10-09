@@ -1,0 +1,6 @@
+{
+  "name": "quota-band",
+  "version": "0.1.0",
+  "description": "Band above the prompt with the 5-hour and weekly quota of Claude, Codex, OpenCode Go and Antigravity",
+  "types": "./types/index.d.ts"
+}
