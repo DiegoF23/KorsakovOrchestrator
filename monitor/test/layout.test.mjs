@@ -269,9 +269,10 @@ test("every registered theme has the same complete token keyset and early first-
     { id: "claude-desktop", name: "Claude Desktop", background: '"claude-mascot"' },
     { id: "bash", name: "Terminal Bash", background: "null" },
     { id: "naruto", name: "Naruto", background: '"naruto-dusk"' },
+    { id: "vscode", name: "VSCode", background: '"vscode-ghost"' },
     { id: "jarvis", name: "JARVIS", background: '"jarvis-hud"' }
   ]);
-  assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"', '"naruto"', '"jarvis"']);
+  assert.deepEqual(Array.from(html.matchAll(/var ids = \[([^\]]+)\]/g))[0][1].match(/"[^"]+"/g), ['"matrix"', '"claude-desktop"', '"bash"', '"naruto"', '"vscode"', '"jarvis"']);
   const expected = byTheme.get("matrix");
   for (const theme of themes) {
     assert.ok(byTheme.has(theme.id), `${theme.id} has a CSS token block`);
@@ -551,7 +552,7 @@ test("the git graph stays visible in card mode and commit nodes open a hover bub
 });
 
 test("each theme picks the look of the git rails through --rail-style", () => {
-  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii", naruto: "line" };
+  const styles = { matrix: "binary", "claude-desktop": "line", bash: "ascii", naruto: "line", vscode: "ring" };
   for (const [id, style] of Object.entries(styles)) {
     const block = html.slice(html.indexOf(`:root[data-theme="${id}"]`));
     const own = block.slice(0, block.indexOf("\n  }"));
