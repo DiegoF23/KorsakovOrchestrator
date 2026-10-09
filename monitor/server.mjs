@@ -143,6 +143,17 @@ function readBody(request, limit) {
 export function createRequestHandler(config, options = {}) {
   const serverDir = options.serverDir ?? path.dirname(fileURLToPath(import.meta.url));
   const indexFile = path.join(serverDir, "index.html");
+  const pageBuildId = () => {
+    let newest = 0;
+    for (const file of [indexFile, path.join(serverDir, "public", "js", "live-view.mjs")]) {
+      try {
+        newest = Math.max(newest, Math.round(fs.statSync(file).mtimeMs));
+      } catch {
+        // A missing file just does not count.
+      }
+    }
+    return String(newest);
+  };
   const configPath = options.configPath ?? config?.__file ?? null;
   const now = options.now ?? (() => new Date());
   const build = options.buildSnapshot ?? buildSnapshot;
@@ -403,6 +414,9 @@ export function createRequestHandler(config, options = {}) {
             `No se pudo releer la configuración: ${reloaded.error}`
           ];
         }
+        // The page compares this with the build it loaded and reloads itself
+        // when the page code changed under an open tab.
+        snapshot.buildId = pageBuildId();
         const body = JSON.stringify(snapshot);
         send(response, 200, "application/json; charset=utf-8", request.method === "HEAD" ? undefined : body);
       } catch (error) {

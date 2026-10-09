@@ -246,7 +246,7 @@ export function mergeOfficialUsage({ official, deltas, resetDeltas = [], estimat
   const rolled = resetAt !== null && now > resetAt;
   const summed = sumEstimatePct(deltas);
   const summedAfterReset = sumEstimatePct(resetDeltas);
-  const rolling = rolled ? summedAfterReset.fiveHour : clampPct(Math.round(number(official.rolling) + summed.fiveHour));
+  const rolling = rolled ? summedAfterReset.fiveHour : clampPct(Math.round(number(official.rollingDisplay ?? official.rolling) + summed.fiveHour));
   const weekly = clampPct(Math.round(number(official.weekly) + summed.week));
   const nextReset = rolled && resetAt ? new Date(resetAt.getTime() + 5 * 3600 * 1000) : resetAt;
   // Age of the official snapshot; the estimate-only mode has no snapshot time.
@@ -410,7 +410,7 @@ async function fetchSessionMessages(worker, ctx) {
       ? sessions.filter((session) => normalizeDir(session?.directory) === wanted)
       : sessions
     : [];
-  const picked = pickSession(inDir, worker?.name);
+  const picked = (worker?.sessionId && inDir.find((session) => session?.id === worker.sessionId)) || pickSession(inDir, worker?.name);
   if (!picked?.id) return { messages: null, notice: "sin sesión activa" };
   const messages = await request(`${base}/session/${encodeURIComponent(picked.id)}/message`, 8000);
   return { messages, notice: null, base, inDir, picked };

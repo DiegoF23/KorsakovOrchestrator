@@ -157,3 +157,31 @@ test("collectBranches lists the local branches a graph shows, without remote pre
   assert.deepEqual(collectBranches(assignLanes(parseGitLog(read("git-log-parallel.txt")))), ["feature/x", "main"]);
   assert.deepEqual(collectBranches([]), []);
 });
+
+test("lanes carrying main or master are flagged for the page", () => {
+  const rows = assignLanes(parseGitLog([
+    ["a1", "b2", "HEAD -> main", "tip", "3"].join("|"),
+    ["b2", "", "", "root", "2"].join("|")
+  ].join(String.fromCharCode(10))));
+  assert.equal(rows[0].laneMain[0], true);
+});
+
+test("with a main chain, the lane waiting for a main commit is flagged whatever its name", () => {
+  const nl = String.fromCharCode(10);
+  const rows = assignLanes(
+    parseGitLog(
+      [
+        ["m2", "m1 f1", "HEAD -> main", "merge", "4"].join("|"),
+        ["f1", "m1", "feature", "work", "3"].join("|"),
+        ["m1", "", "", "base", "2"].join("|")
+      ].join(nl)
+    ),
+    { mainShas: new Set(["m2", "m1"]) }
+  );
+  assert.equal(rows[0].laneMain[rows[0].lane], true);
+  const feature = rows[1];
+  assert.equal(feature.laneMain[feature.lane], false);
+  const order = rows[0].parents.map((link) => link.sha);
+  assert.equal(rows[0].parentsMain[order.indexOf("f1")], false);
+  assert.equal(rows[0].parentsMain[order.indexOf("m1")], true);
+});

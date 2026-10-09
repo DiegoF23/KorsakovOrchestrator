@@ -129,7 +129,12 @@ export function parseGitLog(stdout) {
 // - laneColorIndexes: the matching palette slot per lane (never -1 here: an
 //   unnamed lane falls back to its own position in the palette), so the page
 //   can paint with the theme's `--branch-<index>` variables.
-export function assignLanes(commits) {
+// `mainShas` (optional Set) holds the first-parent chain of main/master: the
+// lanes that wait for one of those commits are flagged in `laneMain` (line
+// above the row) and `laneMainAfter` (line below it), whatever name the lane
+// carries; without it the lane named main/master (or lane 0) is used.
+export function assignLanes(commits, options = {}) {
+  const mainShas = options.mainShas instanceof Set && options.mainShas.size ? options.mainShas : null;
   const active = [];
   const activeNames = [];
   const rows = [];
@@ -190,12 +195,21 @@ export function assignLanes(commits) {
     while (lanesAfter.length && lanesAfter[lanesAfter.length - 1] === null) lanesAfter.pop();
     const laneColors = [];
     const laneColorIndexes = [];
+    const laneMain = [];
+    const laneMainAfter = [];
     for (let index = 0; index < width; index += 1) {
       const name = namesBefore[index];
+      laneMain.push(
+        mainShas ? mainShas.has(index === lane ? commit.sha : lanesBefore[index]) : name ? name === "main" || name === "master" : index === 0
+      );
       laneColors.push(name ? branchColor(name) : LANE_COLORS[index % LANE_COLORS.length]);
       laneColorIndexes.push(name ? branchColorIndex(name) : index % LANE_COLORS.length);
     }
-    rows.push({ ...commit, lane, parents: links, lanesBefore, lanesAfter, laneColors, laneColorIndexes });
+    for (let index = 0; index < width; index += 1) {
+      laneMainAfter.push(mainShas ? mainShas.has(lanesAfter[index]) : laneMain[index]);
+    }
+    const parentsMain = links.map((link) => (mainShas ? mainShas.has(link.sha) : laneMain[link.lane] === true));
+    rows.push({ ...commit, lane, parents: links, lanesBefore, lanesAfter, laneColors, laneColorIndexes, laneMain, laneMainAfter, parentsMain });
   }
 
   return rows.map((row) => ({ ...row, laneCount: width }));
