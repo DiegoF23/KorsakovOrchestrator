@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'">
-<title>Monitor</title>
+<title>Korsakov Orchestrator</title>
 <script>
   // Apply the stored theme before the stylesheet renders so the first paint is
   // already themed. Unknown or missing ids fall back to Matrix; every storage
@@ -1265,6 +1265,29 @@
     background-clip: text;
     filter: var(--glow-title);
   }
+  /* Brand: the name on top and the product line underneath, flattened and
+     stretched across the name's width so the word itself is the underline. */
+  h1.brand {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: stretch;
+    line-height: 1;
+  }
+  .brand-sub {
+    margin-top: 1px;
+    font-size: 11px;
+    font-weight: 300;
+    letter-spacing: 7px;
+    text-align: center;
+    transform: scaleY(0.5);
+    transform-origin: top;
+    /* scaleY keeps the full line box: give back the half it no longer draws. */
+    margin-bottom: -6px;
+    /* Solid fill: the sliced title image is unreadable at this size. */
+    -webkit-text-fill-color: var(--text);
+    color: var(--text);
+    opacity: 0.8;
+  }
   .dim { color: var(--dim); }
   .warn { color: var(--warn); }
   .err { color: var(--err); }
@@ -2028,7 +2051,7 @@
 <div class="app">
   <header class="topbar">
     <div class="topbar-line">
-      <h1>Monitor</h1>
+      <h1 class="brand"><span class="brand-name">Korsakov</span><span class="brand-sub">Orchestrator</span></h1>
       <label class="project-picker" for="project-select">
         <span class="pc-label">PROYECTO</span>
         <select id="project-select" aria-label="Proyecto monitoreado"></select>

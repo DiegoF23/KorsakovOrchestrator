@@ -43,8 +43,8 @@ test("the git lanes and nodes use the branch colours computed by the server", ()
 });
 
 test("the title and the agents heading show the new copy", () => {
-  assert.match(html, /<h1>Monitor<\/h1>/);
-  assert.match(html, /<title>Monitor<\/title>/);
+  assert.match(html, /<span class="brand-name">Korsakov<\/span><span class="brand-sub">Orchestrator<\/span>/);
+  assert.match(html, /<title>Korsakov Orchestrator<\/title>/);
   assert.match(html, /id="workers-title">Agentes/);
   assert.match(html, /" activos \/ " \+ list\.length \+ " en total"/);
 });
