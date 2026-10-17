@@ -43,7 +43,7 @@
   "translate": {
     "_comment": "Spanish display layer: commit subjects and per-builder activity summaries are translated by a free OpenCode model through the shared server (helperExe and server come from kit.config.json). enabled false turns it off; summarySeconds is the minimum gap between summaries per builder. The cache is translations.json next to server.mjs (git-ignored).",
     "enabled": true,
-    "model": "opencode-go/space-bunny-free",
+    "model": "opencode-go/longcat-2.5-preview-free",
     "summarySeconds": 120
   },
   "cleanup": {

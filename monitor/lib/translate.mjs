@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_MODEL = "opencode-go/space-bunny-free";
+export const DEFAULT_MODEL = "opencode-go/longcat-2.5-preview-free";
 export const MAX_BATCH = 40;
 export const MAX_SUMMARY_CHARS = 120;
 export const MAX_SUMMARY_EVENTS = 20;

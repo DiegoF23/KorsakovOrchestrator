@@ -30,7 +30,7 @@ function worker(name, events) {
 }
 
 const KIT = { helperExe: "C:\\tools\\opencode.cmd", server: { host: "127.0.0.1", port: 4096 } };
-const CONFIG = { translate: { model: "opencode-go/space-bunny-free" } };
+const CONFIG = { translate: { model: "opencode-go/longcat-2.5-preview-free" } };
 
 test("the numbered reply maps by number and tolerates quotes, dots and blank lines", () => {
   const parsed = parseNumberedReply("1\t\"Primero\"\n\n2. Segundo\n3) 'Tercero'", 3);

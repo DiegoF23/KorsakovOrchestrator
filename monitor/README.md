@@ -285,7 +285,7 @@ Nada de esto bloquea la página: primero se muestra el texto en inglés y cuando
 la traducción llega aparece en el siguiente refresco. Hay como mucho **un
 pedido en vuelo**; si el helper falla, se mantiene el inglés y se reintenta con
 espera exponencial (de 1 a 15 minutos). El modelo se cambia con
-`translate.model` (`opencode-go/space-bunny-free` por defecto) y todo se apaga
+`translate.model` (`opencode-go/longcat-2.5-preview-free` por defecto) y todo se apaga
 con `translate.enabled: false`.
 
 ## Pistas de Antigravity
@@ -323,7 +323,7 @@ y `~`. Claves:
 | `repo` | Repositorio para el árbol de git y el último commit; si falta, se usa el del kit. |
 | `projects` | Lista opcional de proyectos vigilados (`id`, `name`, `repo`, `kitConfig`); sin ella queda el proyecto implícito de `repo` + `workers.kitConfig`. |
 | `translate.enabled` | `false` apaga las traducciones y los resúmenes (por defecto, encendidos). |
-| `translate.model` | Modelo del helper (`opencode-go/space-bunny-free` por defecto). |
+| `translate.model` | Modelo del helper (`opencode-go/longcat-2.5-preview-free` por defecto). |
 | `translate.summarySeconds` | Mínimo entre resúmenes por pista (120 s por defecto). |
 | `cleanup.hideFinishedAfterMinutes` | Minutos de antigüedad a partir de los cuales se ocultan las tarjetas `terminado` o `detenido` (`5` por defecto; el uso diario recomendado es `2`); `0` o la clave ausente desactivan la limpieza. Un lote de subagentes sale entero cuando el último de sus miembros cumple ese plazo. |
 | `discoverClaudeProjects` | `true` agrega al selector los proyectos que Claude Code conoce (carpeta `~/.claude/projects`); omite scratch, worktrees y carpetas temporales. Apagado por defecto. |
