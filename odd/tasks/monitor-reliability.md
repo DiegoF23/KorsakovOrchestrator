@@ -40,9 +40,9 @@ and a worker whose runner died is resolved as done or error instead of staying
 
 ## Tasks
 
-- [ ] T1 Translation model default to longcat-2.5-preview-free (route: inline, 1 mechanical change across config/docs/tests)
-- [ ] T2 Bounded concurrency in buildWorkers + in-flight dedupe in memo, with tests (route: delegated builder, 1-2 non-trivial files)
-- [ ] T3 Orphaned-worker detection by process start time + hound verdict cache + UI states, with tests (route: delegated builder, 3+ non-trivial files)
+- [x] T1 Translation model default to longcat-2.5-preview-free (route: inline, 1 mechanical change across config/docs/tests)
+- [x] T2 Bounded concurrency in buildWorkers + in-flight dedupe in memo, with tests (route: delegated builder, 1-2 non-trivial files)
+- [x] T3 Orphaned-worker detection by process start time + hound verdict cache + UI states, with tests (route: delegated builder, 3+ non-trivial files)
 
 ## Checks
 
@@ -52,3 +52,10 @@ and a worker whose runner died is resolved as done or error instead of staying
 ## Progress
 
 - Branch: `feat/monitor-reliability`
+- T1 e162657: translator on longcat; translations.json written again 2026-10-16 21:53 (603 cached commits).
+- T2 8eab084 (OpenCode builder, reviewed): flota /api/state 11.6 s (was > 60 s).
+- T3 64b8b08 (OpenCode builder, reviewed) + 93dcf8c fix: PowerShell exits 1 when a pid in the batch is gone, which emptied the start-time map; forced exit 0. Hound reason forced to Spanish.
+- Verified live: spec-draft went error "proceso perdido · analizando" -> done in ~45 s with a Spanish reason; verdict cached in monitor/verdicts.json.
+- Tests: node --test monitor/test/*.test.mjs -> 334 tests, 333 pass, 0 fail, 1 skipped.
+- Open: server crashes with 0xC0000409 several times a day (seen again 21:50:19, 24 s after start); not investigated.
+- Next: merge feat/monitor-reliability into main and push (user decision).
