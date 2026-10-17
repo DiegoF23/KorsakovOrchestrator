@@ -167,6 +167,35 @@ export function createRequestHandler(config, options = {}) {
   const port = Number(options.port ?? config?.server?.port) || 4200;
   const stepsCache = new Map();
 
+  // A big project takes seconds to read. The last snapshot of each project is
+  // answered at once and refreshed in the background once it is older than
+  // `snapshotFreshMs`; overlapping requests (several open tabs) share a single
+  // build. Only the very first request of a project waits for a build.
+  const snapshotFreshMs = Number(options.snapshotFreshMs ?? 2000);
+  const snapshots = new Map();
+  const cachedSnapshot = async (projectId, makeSnapshot) => {
+    const entry = snapshots.get(projectId) ?? { value: null, at: 0, pending: null };
+    snapshots.set(projectId, entry);
+    const refresh = () => {
+      if (!entry.pending) {
+        entry.pending = Promise.resolve()
+          .then(makeSnapshot)
+          .then((value) => {
+            entry.value = value;
+            entry.at = Date.now();
+            return value;
+          })
+          .finally(() => {
+            entry.pending = null;
+          });
+      }
+      return entry.pending;
+    };
+    if (!entry.value) return refresh();
+    if (Date.now() - entry.at >= snapshotFreshMs) refresh().catch(() => {});
+    return entry.value;
+  };
+
   // Steps are computed on request and cached per project + worker for
   // pollSeconds, exactly like the other expensive reads. A missing worker is
   // never cached so it can appear as soon as its track exists.
@@ -413,7 +442,10 @@ export function createRequestHandler(config, options = {}) {
           send(response, 404, "application/json; charset=utf-8", request.method === "HEAD" ? undefined : JSON.stringify({ error: "unknown project" }));
           return;
         }
-        const snapshot = await build(reloaded.config, { now: now(), project });
+        // The config is part of the key: an edited fleet-monitor.config.json
+        // must show up on the very next request, never behind a cached build.
+        const cacheKey = `${project.id}\u0000${JSON.stringify(reloaded.config)}`;
+        const snapshot = { ...(await cachedSnapshot(cacheKey, () => build(reloaded.config, { now: now(), project }))) };
         if (reloaded.error) {
           snapshot.notices = [
             ...(Array.isArray(snapshot.notices) ? snapshot.notices : []),

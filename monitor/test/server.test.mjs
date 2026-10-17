@@ -438,3 +438,36 @@ test("/api/steps reports an engine without a step mapper as unsupported", async 
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(response.body), { project: "one", worker: "codex", steps: [], unsupported: true });
 });
+
+test("/api/state answers the cached snapshot at once and overlapping requests share one build", async () => {
+  const file = tempConfig({ orchestrator: { model: "one" } });
+  let builds = 0;
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const handler = createRequestHandler({ __file: file }, {
+    serverDir: path.dirname(file),
+    configPath: file,
+    snapshotFreshMs: 60000,
+    buildSnapshot: async () => {
+      builds += 1;
+      await gate;
+      return { notices: [], generatedAt: `build-${builds}` };
+    }
+  });
+
+  const first = mockResponse();
+  const second = mockResponse();
+  const both = Promise.all([handler(request("GET", "/api/state"), first), handler(request("GET", "/api/state"), second)]);
+  release();
+  await both;
+  assert.equal(builds, 1);
+  assert.equal(JSON.parse(first.body).generatedAt, "build-1");
+  assert.equal(JSON.parse(second.body).generatedAt, "build-1");
+
+  const third = mockResponse();
+  await handler(request("GET", "/api/state"), third);
+  assert.equal(builds, 1);
+  assert.equal(JSON.parse(third.body).generatedAt, "build-1");
+});
