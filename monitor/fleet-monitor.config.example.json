@@ -46,6 +46,11 @@
     "model": "opencode-go/longcat-2.5-preview-free",
     "summarySeconds": 120
   },
+  "hound": {
+    "_comment": "Sabueso de workers huérfanos: cuando el proceso de una pista ya no corre (murió o Windows reutilizó su pid), le pide al modelo gratuito de OpenCode que decida terminado o detenido a partir de la evidencia (estado, progreso, últimos pasos y commits de la rama). El veredicto se cachea en verdicts.json (git-ignored). enabled false lo apaga; model elige el modelo (opencode-go/longcat-2.5-preview-free por defecto).",
+    "enabled": true,
+    "model": "opencode-go/longcat-2.5-preview-free"
+  },
   "cleanup": {
     "_comment": "Oculta del tablero las tarjetas terminadas o detenidas cuyo último estado sea más viejo que estos minutos (5 por defecto). El encabezado de agentes permite mostrarlas de nuevo. 0 o la clave ausente desactivan la limpieza.",
     "hideFinishedAfterMinutes": 5

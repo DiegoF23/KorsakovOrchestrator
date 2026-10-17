@@ -28,9 +28,10 @@ El servidor escucha **solo en 127.0.0.1** (un host distinto en la configuración
 se fuerza de vuelta a loopback), sirve `GET /` con la página y
 `GET /api/state` con una foto JSON. No escribe nada, no mata ni lanza procesos:
 solo lee archivos y ejecuta `git` y consultas de sistema de solo lectura. La
-única excepción es la capa de traducción (ver más abajo): guarda su caché en
-`translations.json` y llama al helper en segundo plano, y la acción explícita
-"abrir en el Explorador" (ver "Archivos de los agentes").
+única excepción es la capa de traducción y el sabueso de workers huérfanos (ver
+más abajo): guardan sus cachés en `translations.json` y `verdicts.json` y llaman
+al helper en segundo plano, más la acción explícita "abrir en el Explorador"
+(ver "Archivos de los agentes").
 
 ## Qué muestra
 
@@ -288,6 +289,24 @@ espera exponencial (de 1 a 15 minutos). El modelo se cambia con
 `translate.model` (`opencode-go/longcat-2.5-preview-free` por defecto) y todo se apaga
 con `translate.enabled: false`.
 
+## Workers huérfanos (el sabueso)
+
+Un worker cuyo proceso ya no corre —murió a mitad de camino o Windows reutilizó
+su pid para otro programa— se veía como `sin reporte reciente` para siempre,
+porque el supervisor nunca alcanzó a escribir el estado final. Ahora el monitor
+compara la hora de arranque del proceso con la hora del archivo de estado
+(pid vivo que arrancó después ⇒ no es el runner) y marca al worker como
+**huérfano**. Para un huérfano le pide al mismo helper gratuito de OpenCode (el
+`sabueso`) que decida `terminado` o `detenido` a partir de la evidencia: estado,
+progreso de tareas, últimos pasos y los commits de la rama desde el inicio. El
+veredicto se cachea en `verdicts.json` (git-ignored) por proyecto + pista + hora
+de estado, así sobrevive a un reinicio y una corrida nueva de la misma pista se
+vuelve a juzgar. `terminado` pinta la tarjeta verde y se oculta como cualquier
+otra terminada; `detenido` la pinta roja; mientras no hay veredicto se muestra
+roja con `proceso perdido · analizando`, nunca `sin reporte reciente`. El
+sabueso usa `hound.model` (`opencode-go/longcat-2.5-preview-free` por defecto),
+corre de a una llamada y se apaga con `hound.enabled: false`.
+
 ## Pistas de Antigravity
 
 Para registrar un trabajador de Antigravity, la pista en `kit.config.json` debe definir `engine: "antigravity"`, el `model` y `activityFile` apuntando al archivo NDJSON generado. El patrón de lanzamiento desde el directorio de trabajo del constructor es:
@@ -325,6 +344,8 @@ y `~`. Claves:
 | `translate.enabled` | `false` apaga las traducciones y los resúmenes (por defecto, encendidos). |
 | `translate.model` | Modelo del helper (`opencode-go/longcat-2.5-preview-free` por defecto). |
 | `translate.summarySeconds` | Mínimo entre resúmenes por pista (120 s por defecto). |
+| `hound.enabled` | `false` apaga el sabueso que decide si un worker huérfano terminó o falló (por defecto, encendido). |
+| `hound.model` | Modelo del sabueso (`opencode-go/longcat-2.5-preview-free` por defecto). |
 | `cleanup.hideFinishedAfterMinutes` | Minutos de antigüedad a partir de los cuales se ocultan las tarjetas `terminado` o `detenido` (`5` por defecto; el uso diario recomendado es `2`); `0` o la clave ausente desactivan la limpieza. Un lote de subagentes sale entero cuando el último de sus miembros cumple ese plazo. |
 | `discoverClaudeProjects` | `true` agrega al selector los proyectos que Claude Code conoce (carpeta `~/.claude/projects`); omite scratch, worktrees y carpetas temporales. Apagado por defecto. |
 | `orchestratorSessions` | `true` muestra la tarjeta de la sesión del orquestador de Claude Code (apagado por defecto). |

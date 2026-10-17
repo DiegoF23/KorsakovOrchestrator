@@ -29,8 +29,30 @@ test("the gap between two attempts is cyan (waiting)", () => {
   assert.equal(workerState({ state: "running", pid: 1, time: at(1) }, now, dead), "waiting");
 });
 
-test("a builder gone for minutes without finishing is an error", () => {
-  assert.equal(workerState({ state: "running", pid: 1, time: at(10) }, now, dead), "error");
+test("a builder gone for minutes without finishing is orphaned", () => {
+  assert.equal(workerState({ state: "running", pid: 1, time: at(10) }, now, dead), "orphaned");
+});
+
+test("a live pid that started after the status time is orphaned, not stale", () => {
+  const statusTime = at(9);
+  const startedLater = new Date(now.getTime() - 2 * 60000).getTime();
+  const start = (pid) => (pid === 7 ? startedLater : null);
+  assert.equal(workerState({ state: "running", pid: 7, time: statusTime }, now, alive, start), "orphaned");
+});
+
+test("a genuine runner that started before the status time keeps its old behavior", () => {
+  const started = new Date(now.getTime() - 60 * 60000).getTime();
+  const start = () => started;
+  assert.equal(workerState({ state: "running", pid: 7, time: at(1) }, now, alive, start), "working");
+  assert.equal(workerState({ state: "running", pid: 7, time: at(9) }, now, alive, start), "stale");
+});
+
+test("the process start time allows two seconds of clock skew", () => {
+  const statusMs = now.getTime() - 9 * 60000;
+  const start = () => statusMs + 1500;
+  assert.equal(workerState({ state: "running", pid: 7, time: new Date(statusMs).toISOString() }, now, alive, start), "stale");
+  const late = () => statusMs + 2500;
+  assert.equal(workerState({ state: "running", pid: 7, time: new Date(statusMs).toISOString() }, now, alive, late), "orphaned");
 });
 
 test("a track parked on WAITING (exit 5) reads esperando, not stopped", () => {

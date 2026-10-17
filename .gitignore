@@ -1,7 +1,8 @@
 # Machine-local Korsakov state: monitor/kit configs, briefs, logs.
 .korsakov/
-# Monitor translation cache and local config.
+# Monitor translation cache, hound verdict cache and local config.
 monitor/translations.json
+monitor/verdicts.json
 monitor/fleet-monitor.config.json
 node_modules/
 

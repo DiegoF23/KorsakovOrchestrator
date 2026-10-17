@@ -22,6 +22,7 @@ import {
   workerStateKind
 } from "./format.mjs";
 import { assignLanes, branchColor, branchColorIndex, collectBranches, NEUTRAL_BRANCH_COLOR, parseGitLog } from "./graph.mjs";
+import { houndRequest, houndVerdict, verdictKey } from "./hound.mjs";
 import { idleText, progressPace } from "./progress.mjs";
 import { enrichSnapshot } from "./translate.mjs";
 
@@ -30,6 +31,11 @@ const execFileAsync = promisify(execFile);
 const ADAPTERS = { claude, codex, opencode, antigravity };
 const ENGINE_TO_ADAPTER = { "claude-code": "claude", codex: "codex", opencode: "opencode", antigravity: "antigravity" };
 const STATE_TEXT = { working: "trabajando", done: "terminado", error: "detenido", waiting: "esperando", stale: "sin reporte reciente" };
+// Shown while an orphaned worker waits for the hound's verdict; it never reads
+// "sin reporte reciente" (stale) again.
+export const ORPHAN_PENDING_TEXT = "proceso perdido · analizando";
+// The singleton hound service, lazily created by houndVerdict on first use.
+const defaultHound = { verdictFor: (key, makeRequest) => houndVerdict(key, makeRequest) };
 // The git panel scrolls on its own, so it can afford the whole recent history.
 export const GIT_LOG_LIMIT = 200;
 export const DEFAULT_PROJECT_ID = "default";
@@ -242,6 +248,11 @@ export async function buildSnapshot(config, options = {}) {
     ? path.resolve(kitDir ?? baseDir, expandVars(String(kit.worktreeParent)))
     : null;
   const ctx = { config, kit, kitDir, repo, worktreeParent, now, project };
+  // One PowerShell batch per snapshot resolves the start time of every running
+  // pid, so `workerState` can tell a reused pid from the real runner. The hound
+  // service decides done vs error for the workers whose runner is gone.
+  ctx.pidStart = await processStartLookup(ctx);
+  ctx.hound = defaultHound;
 
   const usages = await usageSnapshot(ctx);
   const builtWorkers = await buildWorkers(ctx);
@@ -1251,9 +1262,6 @@ async function buildWorker(track, ctx) {
   });
   const identity = trackIdentity(engine, track);
   const shortTitle = trackShortTitle(track);
-  // Synthetic orchestrator tracks carry their state from the transcript age.
-  const state = track.__state ?? workerState(status, ctx.now);
-  const stateKind = workerStateKind(state);
   const branch = String(track.branch || name);
   // Optional JSONL transcript of a Claude subagent; other engines ignore it.
   const activityFile = resolveKitPath(track.activityFile, ctx.kit, ctx.kitDir, ctx.config.__baseDir);
@@ -1270,6 +1278,34 @@ async function buildWorker(track, ctx) {
   // fallback for workers without a list.
   const progress = activity.progress ?? null;
   const lastStepAt = activity.lastStepAt ?? null;
+  // Synthetic orchestrator tracks carry their state from the transcript age.
+  // A real orphaned worker is mapped here: a cached hound verdict decides done
+  // vs error; without a verdict it shows as error while the hound retries.
+  const rawState = track.__state ?? workerState(status, ctx.now, ctx.pidAlive, ctx.pidStart);
+  let state = rawState;
+  let stateText = null;
+  if (rawState === "orphaned") {
+    stateText = ORPHAN_PENDING_TEXT;
+    state = "error";
+    const key = verdictKey(ctx.project?.id, name, status?.time);
+    const verdict =
+      ctx.hound?.verdictFor(key, async () =>
+        houndRequest(ctx, {
+          trackName: name,
+          title: shortTitle,
+          statusText: orphanStatusText(status),
+          progress,
+          steps: (activity.events ?? []).map((event) => `${event?.kind ?? ""}: ${event?.detail ?? ""}`.trim()),
+          // The branch lives in the project repo; without one, the worker's own
+          // workdir is the only place to look.
+          commits: await gitCommitsSince(ctx.repo ?? workdir, ctx.repo ? branch : "HEAD", status?.time)
+        })
+      ) ?? null;
+    if (verdict?.verdict === "done") state = "done";
+    else if (verdict?.verdict === "error") state = "error";
+    if (verdict) stateText = verdict.reason || null;
+  }
+  const stateKind = workerStateKind(state);
   // A finished or stopped worker keeps its status text ("terminado"): a todo
   // list it left half-ticked must not project a remaining time or a pace.
   const finished = stateKind === "done" || stateKind === "error";
@@ -1295,7 +1331,7 @@ async function buildWorker(track, ctx) {
     engine,
     state,
     stateKind,
-    stateText: STATE_TEXT[state] ?? state,
+    stateText: stateText ?? STATE_TEXT[state] ?? state,
     statusTime: track.__statusTime ?? status?.time ?? null,
     model: modelText(engine, ctx.kit, ctx.config, track),
     workdir,
@@ -1378,10 +1414,19 @@ export function resolveWorkerWorkdir(config, options = {}) {
   return resolveKitPath(track.workdir, kit, project.kitConfig ? path.dirname(project.kitConfig) : null, baseDir);
 }
 
+// Clock skew allowed between the process start time and the status file time.
+export const ORPHAN_START_TOLERANCE_MS = 2000;
+
 // Red is only for real failures. A busy PC can delay the supervisor heartbeat
 // (written every ~60 s) and a builder is briefly gone between two attempts:
 // both show as amber instead of "detenido".
-export function workerState(status, now, pidAlive = isPidAlive) {
+//
+// `pidStart` returns the start time (ms) of a pid, or null when it is unknown.
+// Windows reuses pids, so a live pid is only the runner when its process began
+// at or before the status file was written. A live pid that started later, or a
+// dead pid past the waiting window, means the runner is gone: the worker is
+// "orphaned" and the hound decides its outcome.
+export function workerState(status, now, pidAlive = isPidAlive, pidStart = () => null) {
   if (!status) return "error";
   const time = new Date(status.time).getTime();
   const ageMinutes = Number.isFinite(time) ? (now.getTime() - time) / 60000 : Infinity;
@@ -1391,9 +1436,12 @@ export function workerState(status, now, pidAlive = isPidAlive) {
   if (status.state === "waiting") return "waiting";
   if (status.state === "running") {
     const alive = pidAlive(status.pid);
+    const startMs = Number.isFinite(time) ? pidStart(status.pid) : null;
+    if (alive && Number.isFinite(startMs) && startMs > time + ORPHAN_START_TOLERANCE_MS) return "orphaned";
     if (alive && ageMinutes <= 5) return "working";
     if (alive) return "stale";
     if (ageMinutes <= 3) return "waiting";
+    return "orphaned";
   }
   return "error";
 }
@@ -1421,6 +1469,34 @@ export function modelText(engine, kit, config, track = {}) {
   }
   const short = String(model.opencode ?? "").split("/").pop();
   return modelLabel(short, model.variant);
+}
+
+// The status text handed to the hound: whatever the status file says about the
+// run, falling back to its state ("running").
+function orphanStatusText(status) {
+  const message = String(status?.message ?? status?.detail ?? "").trim();
+  return message || String(status?.state ?? "");
+}
+
+// One line per commit on the worker's branch since the status start time, for
+// the hound's evidence. Bounded and timed out; an unknown repo or time is
+// simply no evidence.
+async function gitCommitsSince(repo, ref, sinceIso, limit = 20) {
+  const since = sinceIso ? new Date(sinceIso) : null;
+  if (!repo || !ref || !since || !Number.isFinite(since.getTime())) return [];
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["-C", repo, "log", "--oneline", `--since=${since.toISOString()}`, "-n", String(limit), ref],
+      { timeout: 8000, windowsHide: true, maxBuffer: 1024 * 1024 }
+    );
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 async function gitLastCommit(repo, branch) {
@@ -1481,6 +1557,59 @@ async function gitGraph(repo) {
   } catch {
     return { commits: [], branches: [], error: "no se pudo leer el árbol de git" };
   }
+}
+
+const PROCESS_START_TIMEOUT_MS = 8000;
+
+// Start time (ms) of every pid, resolved in one PowerShell batch. `tasklist`
+// carries no start time, so PowerShell is the cheap source. A pid with no start
+// time (dead, not Windows, PowerShell error) is simply absent from the map and
+// the caller trusts the pid as before. Exported for the tests.
+export async function probeProcessStarts(pids) {
+  const wanted = [
+    ...new Set((Array.isArray(pids) ? pids : []).map(Number).filter((pid) => Number.isInteger(pid) && pid > 0))
+  ];
+  const starts = new Map();
+  if (wanted.length === 0 || process.platform !== "win32") return starts;
+  const script =
+    "$ErrorActionPreference='SilentlyContinue'; " +
+    `Get-Process -Id ${wanted.join(",")} | ForEach-Object { if ($_.StartTime) { "$($_.Id)|$($_.StartTime.ToUniversalTime().ToString('o'))" } }`;
+  try {
+    const { stdout } = await execFileAsync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: PROCESS_START_TIMEOUT_MS, windowsHide: true, maxBuffer: 64 * 1024 }
+    );
+    for (const line of stdout.split(/\r?\n/)) {
+      const [id, iso] = line.trim().split("|");
+      const pid = Number(id);
+      const ms = new Date(iso).getTime();
+      if (Number.isInteger(pid) && Number.isFinite(ms)) starts.set(pid, ms);
+    }
+  } catch {
+    // No start times: the pid check alone decides, as before.
+  }
+  return starts;
+}
+
+// A per-snapshot `(pid) => startMs | null`, built from one batched probe of the
+// pids every running status file names. Cached briefly through `memo`, so the
+// overlapping polls of a slow project share the same probe.
+async function processStartLookup(ctx) {
+  if (!ctx.kitDir || !ctx.kit?.tracks) return () => null;
+  const pids = [];
+  for (const track of ctx.kit.tracks ?? []) {
+    if (!track) continue;
+    const status = readJson(path.join(ctx.kitDir, `status-${String(track.name ?? "")}.json`));
+    if (status?.state === "running") pids.push(status.pid);
+  }
+  if (pids.length === 0) return () => null;
+  const key = `pids:${pids.map(Number).sort((a, b) => a - b).join(",")}`;
+  const starts = await memo(key, seconds(ctx.config.systemCacheSeconds, 10), () => probeProcessStarts(pids), new Map());
+  return (pid) => {
+    const ms = starts instanceof Map ? starts.get(Number(pid)) : undefined;
+    return Number.isFinite(ms) ? ms : null;
+  };
 }
 
 async function probePc() {

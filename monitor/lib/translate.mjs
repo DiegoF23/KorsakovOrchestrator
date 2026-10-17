@@ -287,13 +287,16 @@ export function collectText(stdout) {
   return text.trim();
 }
 
-function helperSettings(ctx) {
+// The shared OpenCode helper used by the Spanish display layer. `model`
+// overrides the translate default (the hound uses its own free model); the exe
+// and server always come from the kit, so without them there is no helper.
+export function helperSettings(ctx, model) {
   const exe = String(ctx.kit?.helperExe || ctx.kit?.opencodeExe || "").trim();
   const host = ctx.kit?.server?.host;
   const port = Number(ctx.kit?.server?.port);
   if (!exe || !host || !Number.isFinite(port) || port <= 0) return null;
-  const model = String(ctx.config?.translate?.model || "").trim() || DEFAULT_MODEL;
-  return { exe, server: `http://${host}:${port}`, model };
+  const chosen = String(model ?? ctx.config?.translate?.model ?? "").trim() || DEFAULT_MODEL;
+  return { exe, server: `http://${host}:${port}`, model: chosen };
 }
 
 function isWorking(card) {
