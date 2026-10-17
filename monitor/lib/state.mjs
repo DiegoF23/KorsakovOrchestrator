@@ -34,6 +34,7 @@ const STATE_TEXT = { working: "trabajando", done: "terminado", error: "detenido"
 export const GIT_LOG_LIMIT = 200;
 export const DEFAULT_PROJECT_ID = "default";
 const cache = new Map();
+const inflight = new Map();
 
 const PC_SCRIPT =
   "$ErrorActionPreference='SilentlyContinue'; " +
@@ -1104,24 +1105,51 @@ function resolveWorktreeParent(kit, project) {
   return base ? path.resolve(base, expandVars(String(kit.worktreeParent))) : String(kit.worktreeParent);
 }
 
+// How many workers build at once. Each one costs a few OpenCode HTTP calls, so
+// a big project stays responsive without opening one connection per agent.
+export const BUILD_WORKERS_CONCURRENCY = 8;
+
 export async function buildWorkers(ctx) {
-  const out = [];
+  // Resolve the visible tracks first (pure and synchronous), keeping their
+  // order. Then run the slow per-worker reads with bounded concurrency and
+  // return the results in that same order.
+  const picked = [];
   const renderedGroups = new Set();
   for (const track of ctx.kit?.tracks ?? []) {
     if (!track) continue;
     // board: false hides a track, except while it is actually running: work
     // the orchestrator hands out must show even if nobody flipped the flag.
     if (track.board === false && !isRunningNow(track, ctx)) continue;
-    let picked = track;
+    let chosen = track;
     if (track.group) {
       if (renderedGroups.has(track.group)) continue;
       renderedGroups.add(track.group);
-      picked = pickGroup(ctx.kit, ctx.kitDir, track.group);
-      if (!picked || picked.board === false) continue;
+      chosen = pickGroup(ctx.kit, ctx.kitDir, track.group);
+      if (!chosen || chosen.board === false) continue;
     }
-    out.push(await buildWorker(picked, ctx));
+    picked.push(chosen);
   }
-  return out;
+  return mapLimit(picked, BUILD_WORKERS_CONCURRENCY, (track) => buildWorker(track, ctx));
+}
+
+// Runs `worker` over `items` with at most `limit` in flight, returning the
+// results in the original order. A small local helper: no new dependency.
+export async function mapLimit(items, limit, worker) {
+  const list = Array.isArray(items) ? items : [];
+  const results = new Array(list.length);
+  const size = Math.max(1, Math.min(Number(limit) || 1, list.length));
+  let next = 0;
+  const run = async () => {
+    while (next < list.length) {
+      const index = next;
+      next += 1;
+      results[index] = await worker(list[index], index);
+    }
+  };
+  const runners = [];
+  for (let i = 0; i < size; i += 1) runners.push(run());
+  await Promise.all(runners);
+  return results;
 }
 
 const RUNNING_FRESH_MS = 10 * 60000;
@@ -1484,18 +1512,30 @@ async function probePc() {
   return result;
 }
 
-async function memo(key, ttlMs, producer, fallback) {
-  const hit = cache.get(key);
+// TTL cache with in-flight dedupe: concurrent callers of the same key share a
+// single build instead of stacking. A build that fails returns the fallback to
+// every caller but is never cached, so the next poll retries it.
+export async function memo(key, ttlMs, producer, fallback) {
   const now = Date.now();
+  const hit = cache.get(key);
   if (hit && now - hit.at < ttlMs) return hit.value;
-  let value;
-  try {
-    value = await producer();
-  } catch {
-    value = fallback;
+  let pending = inflight.get(key);
+  if (!pending) {
+    pending = (async () => {
+      try {
+        return { ok: true, value: await producer() };
+      } catch {
+        return { ok: false };
+      } finally {
+        inflight.delete(key);
+      }
+    })();
+    inflight.set(key, pending);
   }
-  cache.set(key, { at: now, value });
-  return value;
+  const result = await pending;
+  if (!result.ok) return fallback;
+  cache.set(key, { at: Date.now(), value: result.value });
+  return result.value;
 }
 
 function resolveKitPath(value, kit, kitDir, fallbackBase) {
