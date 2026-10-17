@@ -24,6 +24,7 @@ export const HOUND_PROMPT = [
   "A partir de la evidencia decidí si el trabajo TERMINÓ bien o si FALLÓ.",
   'Responder SOLO con un objeto JSON de una línea, sin texto extra ni bloques de código: {"verdict":"done"|"error","reason":"<una sola frase corta en español>"}.',
   'Usá "done" si la evidencia muestra el trabajo completado; "error" si quedó a medias, falló o no hay señales de cierre.',
+  'El campo "reason" va SIEMPRE en español, aunque la evidencia esté en inglés.',
   "Evidencia:"
 ].join(" ");
 

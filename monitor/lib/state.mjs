@@ -1573,7 +1573,10 @@ export async function probeProcessStarts(pids) {
   if (wanted.length === 0 || process.platform !== "win32") return starts;
   const script =
     "$ErrorActionPreference='SilentlyContinue'; " +
-    `Get-Process -Id ${wanted.join(",")} | ForEach-Object { if ($_.StartTime) { "$($_.Id)|$($_.StartTime.ToUniversalTime().ToString('o'))" } }`;
+    `Get-Process -Id ${wanted.join(",")} | ForEach-Object { if ($_.StartTime) { "$($_.Id)|$($_.StartTime.ToUniversalTime().ToString('o'))" } }; ` +
+    // A missing pid in the list makes PowerShell exit 1 even with errors
+    // silenced, and execFile would then throw away the lines it did print.
+    "exit 0";
   try {
     const { stdout } = await execFileAsync(
       "powershell.exe",
