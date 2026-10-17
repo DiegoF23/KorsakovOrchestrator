@@ -30,7 +30,7 @@ const execFileAsync = promisify(execFile);
 
 const ADAPTERS = { claude, codex, opencode, antigravity };
 const ENGINE_TO_ADAPTER = { "claude-code": "claude", codex: "codex", opencode: "opencode", antigravity: "antigravity" };
-const STATE_TEXT = { working: "trabajando", done: "terminado", error: "detenido", waiting: "esperando", stale: "sin reporte reciente" };
+const STATE_TEXT = { working: "trabajando", done: "terminado", error: "detenido", waiting: "esperando", stale: "sin reporte reciente", queued: "en cola" };
 // Shown while an orphaned worker waits for the hound's verdict; it never reads
 // "sin reporte reciente" (stale) again.
 export const ORPHAN_PENDING_TEXT = "proceso perdido · analizando";
@@ -41,6 +41,13 @@ export const GIT_LOG_LIMIT = 200;
 export const DEFAULT_PROJECT_ID = "default";
 const cache = new Map();
 const inflight = new Map();
+// Per project: when each card was first seen in its current state.
+const seenByProject = new Map();
+function seenTracker(projectId) {
+  const key = String(projectId ?? DEFAULT_PROJECT_ID);
+  if (!seenByProject.has(key)) seenByProject.set(key, new Map());
+  return seenByProject.get(key);
+}
 
 const PC_SCRIPT =
   "$ErrorActionPreference='SilentlyContinue'; " +
@@ -256,7 +263,7 @@ export async function buildSnapshot(config, options = {}) {
 
   const usages = await usageSnapshot(ctx);
   const builtWorkers = await buildWorkers(ctx);
-  const hideResult = hideFinishedWorkers(builtWorkers, config, now);
+  const hideResult = hideFinishedWorkers(builtWorkers, config, now, seenTracker(project?.id));
   const workers = finishedByArrival(hideResult.workers);
   const hiddenWorkers = finishedByArrival(hideResult.hiddenWorkers);
   const hiddenFinished = hideResult.hiddenFinished;
@@ -1179,8 +1186,11 @@ function isRunningNow(track, ctx) {
 // so the page can show it again on demand. Working, waiting and stale cards
 // never hide, and neither does a card without a valid status time. 0 or a
 // missing key keeps the whole board, so the default behavior is unchanged.
-export function hideFinishedWorkers(workers, config, now = new Date()) {
-  const list = Array.isArray(workers) ? workers : [];
+// `seen` (optional Map, one per project) remembers when each card was first
+// observed in its current state. A finished card without a status time starts
+// its hide countdown from that moment; any state change restarts it.
+export function hideFinishedWorkers(workers, config, now = new Date(), seen = null) {
+  const list = (Array.isArray(workers) ? workers : []).map((worker) => withSeenTime(worker, seen, now));
   const thresholdMinutes = Number(config?.cleanup?.hideFinishedAfterMinutes);
   if (!Number.isFinite(thresholdMinutes) || thresholdMinutes <= 0) {
     return { workers: list, hiddenFinished: 0, hiddenWorkers: [] };
@@ -1217,6 +1227,16 @@ export function finishedByArrival(workers) {
     return ta === tb ? 0 : tb > ta ? 1 : -1;
   });
   return [...active, ...finished];
+}
+
+function withSeenTime(worker, seen, now) {
+  if (!(seen instanceof Map) || !worker?.name) return worker;
+  const kind = worker.stateKind || worker.state || "";
+  const prior = seen.get(worker.name);
+  const since = prior && prior.kind === kind ? prior.since : now.toISOString();
+  seen.set(worker.name, { kind, since });
+  const known = Number.isFinite(new Date(worker.statusTime ?? "").getTime());
+  return known ? worker : { ...worker, statusTime: since };
 }
 
 function isFinishedWorkerOlderThan(worker, thresholdMinutes, now) {
@@ -1427,7 +1447,9 @@ export const ORPHAN_START_TOLERANCE_MS = 2000;
 // dead pid past the waiting window, means the runner is gone: the worker is
 // "orphaned" and the hound decides its outcome.
 export function workerState(status, now, pidAlive = isPidAlive, pidStart = () => null) {
-  if (!status) return "error";
+  // No status file yet: the track is declared on the board but its runner never
+  // started (a later phase waiting its turn). That is not a failure.
+  if (!status) return "queued";
   const time = new Date(status.time).getTime();
   const ageMinutes = Number.isFinite(time) ? (now.getTime() - time) / 60000 : Infinity;
   // Exit code 5 = phase 1 done, parked until a referenced track finishes.

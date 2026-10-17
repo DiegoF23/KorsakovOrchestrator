@@ -65,5 +65,5 @@ test("finished states keep their meaning", () => {
   assert.equal(workerState({ state: "finished", exitCode: 0, time: at(30) }, now, dead), "done");
   assert.equal(workerState({ state: "finished", exitCode: 2, time: at(30) }, now, dead), "error");
   assert.equal(workerState({ state: "waiting", time: at(30) }, now, dead), "waiting");
-  assert.equal(workerState(null, now, dead), "error");
+  assert.equal(workerState(null, now, dead), "queued");
 });
