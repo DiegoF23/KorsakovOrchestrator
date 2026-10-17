@@ -58,4 +58,6 @@ and a worker whose runner died is resolved as done or error instead of staying
 - Verified live: spec-draft went error "proceso perdido · analizando" -> done in ~45 s with a Spanish reason; verdict cached in monitor/verdicts.json.
 - Tests: node --test monitor/test/*.test.mjs -> 334 tests, 333 pass, 0 fail, 1 skipped.
 - Open: server crashes with 0xC0000409 several times a day (seen again 21:50:19, 24 s after start); not investigated.
+- d970c57: tracks with no status file show as queued ("en cola"), not error; hide countdown starts when a finished card is first seen and restarts on state change (cards with a status time keep using it).
+- 4352276: /api/state answers a per-project cached snapshot at once, refreshes it in the background after 2 s, overlapping requests share one build, config edits bypass the cache. Live: flota first request 9.2 s, next ones 0.6-0.7 s. Tests 339/338 pass/0 fail.
 - Next: merge feat/monitor-reliability into main and push (user decision).
