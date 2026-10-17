@@ -1435,6 +1435,8 @@
   .worker-group.group-error { border-color: rgba(var(--err-rgb), 0.6); }
   .worker-group .mini:only-child { grid-column: span 2; }
   .worker-group .mini { min-width: 0; min-height: 0; overflow: hidden; zoom: 0.5; }
+  /* A pair only fills one row: keep it readable instead of half size. */
+  .worker-group.group-pair .mini { zoom: 0.8; }
   .worker-group .mini > .worker { height: 100%; box-sizing: border-box; }
   .worker.state-working { border-color: rgba(var(--work-rgb), 0.5); }
   .worker.state-done { border-color: rgba(var(--live-rgb), 0.55); --tron-rgb: var(--live-rgb); }
@@ -2655,6 +2657,7 @@
       });
       group.classList.add(kinds.indexOf("working") !== -1 ? "group-working" : kinds.indexOf("error") !== -1 ? "group-error" : "group-done");
       group.setAttribute("data-key", "group:" + key);
+      if (batches[key].length === 2) group.classList.add("group-pair");
       batches[key].forEach(function (worker) {
         var mini = el("div", "mini");
         mini.appendChild(workerCard(worker, MINI_LINES, isHiddenCard(worker)));
