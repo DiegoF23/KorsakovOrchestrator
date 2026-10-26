@@ -285,8 +285,10 @@ modelo gratuito de OpenCode, el mismo helper que usa el tablero de terminal
 Nada de esto bloquea la página: primero se muestra el texto en inglés y cuando
 la traducción llega aparece en el siguiente refresco. Hay como mucho **un
 pedido en vuelo**; si el helper falla, se mantiene el inglés y se reintenta con
-espera exponencial (de 1 a 15 minutos). El modelo se cambia con
-`translate.model` (`opencode-go/longcat-2.5-preview-free` por defecto) y todo se apaga
+espera exponencial (de 1 a 15 minutos), y cada falla deja una línea `translate: ...`
+en `monitor.err.log`. El helper (ejecutable y servidor de OpenCode) sale del kit del
+proyecto; un proyecto sin kit usa `translate.helperExe` y `translate.server`. El modelo se cambia con
+`translate.model` (`opencode-go/beam-free` por defecto) y todo se apaga
 con `translate.enabled: false`.
 
 ## Workers huérfanos (el sabueso)
@@ -304,7 +306,7 @@ de estado, así sobrevive a un reinicio y una corrida nueva de la misma pista se
 vuelve a juzgar. `terminado` pinta la tarjeta verde y se oculta como cualquier
 otra terminada; `detenido` la pinta roja; mientras no hay veredicto se muestra
 roja con `proceso perdido · analizando`, nunca `sin reporte reciente`. El
-sabueso usa `hound.model` (`opencode-go/longcat-2.5-preview-free` por defecto),
+sabueso usa `hound.model` (`opencode-go/beam-free` por defecto),
 corre de a una llamada y se apaga con `hound.enabled: false`.
 
 ## Pistas de Antigravity
@@ -342,10 +344,11 @@ y `~`. Claves:
 | `repo` | Repositorio para el árbol de git y el último commit; si falta, se usa el del kit. |
 | `projects` | Lista opcional de proyectos vigilados (`id`, `name`, `repo`, `kitConfig`); sin ella queda el proyecto implícito de `repo` + `workers.kitConfig`. |
 | `translate.enabled` | `false` apaga las traducciones y los resúmenes (por defecto, encendidos). |
-| `translate.model` | Modelo del helper (`opencode-go/longcat-2.5-preview-free` por defecto). |
+| `translate.model` | Modelo del helper (`opencode-go/beam-free` por defecto). |
+| `translate.helperExe` / `translate.server` | Helper de respaldo para proyectos sin kit (por ejemplo `opencode.cmd` y `http://127.0.0.1:4096`). |
 | `translate.summarySeconds` | Mínimo entre resúmenes por pista (120 s por defecto). |
 | `hound.enabled` | `false` apaga el sabueso que decide si un worker huérfano terminó o falló (por defecto, encendido). |
-| `hound.model` | Modelo del sabueso (`opencode-go/longcat-2.5-preview-free` por defecto). |
+| `hound.model` | Modelo del sabueso (`opencode-go/beam-free` por defecto). |
 | `cleanup.hideFinishedAfterMinutes` | Minutos de antigüedad a partir de los cuales se ocultan las tarjetas `terminado` o `detenido` (`5` por defecto; el uso diario recomendado es `2`); `0` o la clave ausente desactivan la limpieza. Un lote de subagentes sale entero cuando el último de sus miembros cumple ese plazo. |
 | `discoverClaudeProjects` | `true` agrega al selector los proyectos que Claude Code conoce (carpeta `~/.claude/projects`); omite scratch, worktrees y carpetas temporales. Apagado por defecto. |
 | `orchestratorSessions` | `true` muestra la tarjeta de la sesión del orquestador de Claude Code (apagado por defecto). |

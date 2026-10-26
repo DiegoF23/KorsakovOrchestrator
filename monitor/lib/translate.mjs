@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_MODEL = "opencode-go/longcat-2.5-preview-free";
+export const DEFAULT_MODEL = "opencode-go/beam-free";
 export const MAX_BATCH = 40;
 export const MAX_SUMMARY_CHARS = 120;
 export const MAX_SUMMARY_EVENTS = 20;
@@ -205,9 +205,10 @@ export function createTranslationService(options = {}) {
       }
       failures = 0;
       nextAttemptAt = 0;
-    } catch {
+    } catch (error) {
       failures += 1;
       nextAttemptAt = now() + Math.min(maxBackoffMs, baseBackoffMs * 2 ** Math.min(failures - 1, 8));
+      console.error(`translate: ${String(error?.message ?? error).slice(0, 300)} (retry in ${Math.round((nextAttemptAt - now()) / 1000)} s)`);
     }
   }
 
@@ -288,15 +289,22 @@ export function collectText(stdout) {
 }
 
 // The shared OpenCode helper used by the Spanish display layer. `model`
-// overrides the translate default (the hound uses its own free model); the exe
-// and server always come from the kit, so without them there is no helper.
+// overrides the translate default (the hound uses its own free model). The exe
+// and server come from the project's kit; a project without one (no kit
+// declared) uses translate.helperExe and translate.server from the config, and
+// without either there is no helper.
 export function helperSettings(ctx, model) {
+  const chosen = String(model ?? ctx.config?.translate?.model ?? "").trim() || DEFAULT_MODEL;
   const exe = String(ctx.kit?.helperExe || ctx.kit?.opencodeExe || "").trim();
   const host = ctx.kit?.server?.host;
   const port = Number(ctx.kit?.server?.port);
-  if (!exe || !host || !Number.isFinite(port) || port <= 0) return null;
-  const chosen = String(model ?? ctx.config?.translate?.model ?? "").trim() || DEFAULT_MODEL;
-  return { exe, server: `http://${host}:${port}`, model: chosen };
+  if (exe && host && Number.isFinite(port) && port > 0) {
+    return { exe, server: `http://${host}:${port}`, model: chosen };
+  }
+  const fallbackExe = String(ctx.config?.translate?.helperExe ?? "").trim();
+  const fallbackServer = String(ctx.config?.translate?.server ?? "").trim();
+  if (!fallbackExe || !/^https?:\/\//.test(fallbackServer)) return null;
+  return { exe: fallbackExe, server: fallbackServer.replace(/\/+$/, ""), model: chosen };
 }
 
 function isWorking(card) {

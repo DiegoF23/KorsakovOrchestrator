@@ -30,7 +30,7 @@ function worker(name, events) {
 }
 
 const KIT = { helperExe: "C:\\tools\\opencode.cmd", server: { host: "127.0.0.1", port: 4096 } };
-const CONFIG = { translate: { model: "opencode-go/longcat-2.5-preview-free" } };
+const CONFIG = { translate: { model: "opencode-go/beam-free" } };
 
 test("the numbered reply maps by number and tolerates quotes, dots and blank lines", () => {
   const parsed = parseNumberedReply("1\t\"Primero\"\n\n2. Segundo\n3) 'Tercero'", 3);
@@ -184,6 +184,36 @@ test("without a helper, a server or enabled translation the service stays quiet"
   await service.flush();
   assert.equal(calls.length, 0);
   assert.equal(snapshot.git.commits[0].subjectEs, undefined);
+});
+
+test("a project without a kit translates through the helper named in translate config", async () => {
+  const calls = [];
+  const runner = async (request) => {
+    calls.push(request);
+    return "1\tuno";
+  };
+  const cacheFile = tempCache();
+  const service = createTranslationService({ cacheFile, runner, now: () => 0 });
+  const config = {
+    translate: { model: "opencode-go/beam-free", helperExe: "C:\\tools\\opencode.cmd", server: "http://127.0.0.1:4096" }
+  };
+
+  service.enrich({ git: { commits: [commit("a", "feat: one")] } }, { config });
+  await service.flush();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].exe, "C:\\tools\\opencode.cmd");
+  assert.equal(calls[0].server, "http://127.0.0.1:4096");
+  assert.equal(calls[0].model, "opencode-go/beam-free");
+  const later = { git: { commits: [commit("a", "feat: one")] } };
+  service.enrich(later, { config });
+  assert.equal(later.git.commits[0].subjectEs, "feat: uno");
+  assert.equal(JSON.parse(fs.readFileSync(cacheFile, "utf8")).commits.a, "feat: uno");
+
+  // The project's own kit still wins over the config fallback.
+  service.enrich({ git: { commits: [commit("b", "feat: two")] } }, { kit: KIT, config });
+  await service.flush();
+  assert.equal(calls[1].exe, KIT.helperExe);
 });
 
 test("the helper runs in the monitor folder and the prompt never reaches the command line", () => {
